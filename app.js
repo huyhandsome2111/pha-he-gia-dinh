@@ -198,74 +198,96 @@ function renderTree(){
   canvas.innerHTML="";
   if(!people.length)return;
 
-  // Một sơ đồ duy nhất, giữ nguyên khung người. Chỉ thay đổi các thanh nối:
-  // vợ/chồng = ngang; cha mẹ -> con = dọc; anh/chị/em = cùng một thanh ngang.
-  const root=get("me")||people[0];
-  const gen=new Map(), queue=[];
-  const put=(id,g)=>{
-    if(!id||!get(id))return;
-    if(!gen.has(id)){gen.set(id,g);queue.push(id);}
-  };
-  put(root.id,0);
-  while(queue.length){
-    const id=queue.shift(), g=gen.get(id), p=get(id);
-    [p.father,p.mother].filter(Boolean).forEach(x=>put(x,g-1));
-    childrenOf(id).forEach(x=>put(x.id,g+1));
-    if(p.spouse)put(p.spouse,g);
-    siblingsOf(id).forEach(x=>put(x.id,g));
-  }
-  people.forEach(p=>{if(!gen.has(p.id))put(p.id,0)});
-
-  const rows={};
-  gen.forEach((g,id)=>(rows[g]??=[]).push(id));
-  const rowKeys=Object.keys(rows).map(Number).sort((a,b)=>a-b);
-  const minG=Math.min(...rowKeys), maxG=Math.max(...rowKeys);
-  const NODE_W=180, NODE_H=88, COUPLE_GAP=42, GROUP_GAP=72, ROW_H=175, PAD=70;
+  // Layout theo "cụm gia đình": vợ/chồng luôn đứng cùng hàng,
+  // con cái được căn giữa bên dưới cụm cha mẹ. Chỉ dùng đường ngang/dọc.
+  const NODE_W=180, NODE_H=88, COUPLE_GAP=42, GROUP_GAP=90, ROW_H=175, PAD=80;
   const positions={};
+  const groupOf=new Map();
+  const groups=[];
+  const groupKey=(a,b)=>[a,b].filter(Boolean).sort().join('|');
 
-  // Gom vợ/chồng thành một cụm, nhưng vẫn giữ nguyên card đẹp hiện tại.
-  rowKeys.forEach(g=>{
-    const ids=rows[g].slice();
-    const used=new Set(), groups=[];
-    ids.forEach(id=>{
-      if(used.has(id))return;
-      const p=get(id), sid=p?.spouse;
-      if(sid&&ids.includes(sid)&&!used.has(sid)){
-        groups.push([id,sid]); used.add(id); used.add(sid);
-      }else{
-        groups.push([id]); used.add(id);
-      }
-    });
-    groups.sort((a,b)=>{
-      const pa=get(a[0]), pb=get(b[0]);
-      return (pa?.birthOrder||99)-(pb?.birthOrder||99);
-    });
-    rows[g]=groups;
+  people.forEach(p=>{
+    const sid=p.spouse&&get(p.spouse)?p.spouse:"";
+    const key=groupKey(p.id,sid);
+    if(groupOf.has(key))return;
+    const ids=sid?[p.id,sid]:[p.id];
+    const g={key,ids,children:new Set(),parent:null,depth:0};
+    groups.push(g); groupOf.set(key,g);
+  });
+  // Đảm bảo người phối ngẫu được gộp vào cùng cụm.
+  people.forEach(p=>{
+    const sid=p.spouse&&get(p.spouse)?p.spouse:"";
+    const g=groupOf.get(groupKey(p.id,sid));
+    groupOf.set(p.id,g);
   });
 
-  const groupWidth=gr=>gr.length===2 ? NODE_W*2+COUPLE_GAP : NODE_W;
-  const maxRowWidth=Math.max(...rowKeys.map(g=>{
-    const gs=rows[g];
-    return gs.reduce((sum,gr)=>sum+groupWidth(gr),0)+Math.max(0,gs.length-1)*GROUP_GAP;
-  }));
-  const canvasWidth=Math.max(1100, maxRowWidth+PAD*2);
-  const canvasHeight=(maxG-minG+1)*ROW_H+150;
+  // Mỗi con thuộc về cụm cha mẹ (ưu tiên cặp cha+mẹ; nếu thiếu thì cha/mẹ đơn).
+  people.forEach(child=>{
+    const parents=[child.father,child.mother].filter(id=>id&&get(id));
+    if(!parents.length)return;
+    const parent=get(parents[0]);
+    const spouseId=parents.length>1 ? parents[1] : (parent.spouse&&parents.includes(parent.spouse)?parent.spouse:"");
+    const pg=groupOf.get(groupKey(parents[0],spouseId)) || groupOf.get(parents[0]);
+    const cg=groupOf.get(child.id);
+    if(pg && cg && pg!==cg){
+      pg.children.add(cg);
+      if(!cg.parent) cg.parent=pg;
+    }
+  });
 
-  rowKeys.forEach(g=>{
-    const gs=rows[g];
-    const total=gs.reduce((sum,gr)=>sum+groupWidth(gr),0)+Math.max(0,gs.length-1)*GROUP_GAP;
-    let x=Math.max(PAD,(canvasWidth-total)/2);
-    const y=(g-minG)*ROW_H+45;
-    gs.forEach(gr=>{
-      if(gr.length===2){
-        positions[gr[0]]={x,y};
-        positions[gr[1]]={x:NODE_W+COUPLE_GAP+x,y};
-        x+=NODE_W*2+COUPLE_GAP+GROUP_GAP;
-      }else{
-        positions[gr[0]]={x,y};
-        x+=NODE_W+GROUP_GAP;
-      }
-    });
+  // Nếu dữ liệu tạo chu kỳ do hôn nhân/quan hệ chéo, không cho nhóm tự làm con của chính nó.
+  groups.forEach(g=>{ if(g.parent===g) g.parent=null; });
+
+  const roots=groups.filter(g=>!g.parent);
+  const widthMemo=new Map();
+  const calcWidth=(g,stack=new Set())=>{
+    if(widthMemo.has(g))return widthMemo.get(g);
+    if(stack.has(g))return NODE_W+(g.ids.length===2?NODE_W+COUPLE_GAP:0);
+    stack.add(g);
+    const own=g.ids.length===2?NODE_W*2+COUPLE_GAP:NODE_W;
+    const kids=[...g.children];
+    const childWidth=kids.length ? kids.reduce((sum,c)=>sum+calcWidth(c,stack),0)+(kids.length-1)*GROUP_GAP : 0;
+    stack.delete(g);
+    const w=Math.max(own,childWidth);
+    widthMemo.set(g,w); return w;
+  };
+  roots.forEach(calcWidth);
+
+  // Căn các cụm theo thế hệ. Mỗi cụm con nằm giữa tâm của cụm cha mẹ.
+  let cursor=PAD;
+  const rowGroups={};
+  const place=(g,x,depth,visited=new Set())=>{
+    if(visited.has(g))return;
+    visited.add(g); g.depth=depth;
+    (rowGroups[depth]??=[]).push(g);
+    const w=calcWidth(g);
+    const ownW=g.ids.length===2?NODE_W*2+COUPLE_GAP:NODE_W;
+    const ownX=x+(w-ownW)/2;
+    g._x=x; g._ownX=ownX;
+    const kids=[...g.children].sort((a,b)=>calcWidth(a)-calcWidth(b));
+    if(kids.length){
+      const total=kids.reduce((sum,c)=>sum+calcWidth(c),0)+(kids.length-1)*GROUP_GAP;
+      let cx=x+(w-total)/2;
+      kids.forEach(c=>{place(c,cx,depth+1,visited);cx+=calcWidth(c)+GROUP_GAP;});
+    }
+  };
+  roots.forEach(r=>{place(r,cursor,0,new Set());cursor+=calcWidth(r)+GROUP_GAP*1.5;});
+  // Bổ sung nhóm chưa gắn được vào cây.
+  groups.filter(g=>!Object.values(rowGroups).flat().includes(g)).forEach(g=>{place(g,cursor,0,new Set());cursor+=calcWidth(g)+GROUP_GAP;});
+
+  const depths=Object.keys(rowGroups).map(Number);
+  const maxDepth=Math.max(0,...depths);
+  const canvasWidth=Math.max(1100,cursor+PAD);
+  const canvasHeight=(maxDepth+1)*ROW_H+150;
+
+  groups.forEach(g=>{
+    const ownW=g.ids.length===2?NODE_W*2+COUPLE_GAP:NODE_W;
+    const y=45+g.depth*ROW_H;
+    const x=g._ownX;
+    if(g.ids.length===2){
+      positions[g.ids[0]]={x,y};
+      positions[g.ids[1]]={x:NODE_W+COUPLE_GAP+x,y};
+    }else positions[g.ids[0]]={x,y};
   });
 
   canvas.style.width=canvasWidth+"px";
@@ -275,106 +297,49 @@ function renderTree(){
   svg.setAttribute("width",canvasWidth); svg.setAttribute("height",canvasHeight);
   svg.setAttribute("class","family-connectors");
   canvas.appendChild(svg);
-  const line=(x1,y1,x2,y2,cls="")=>{
+  const line=(x1,y1,x2,y2,cls="connector-family")=>{
     const l=document.createElementNS("http://www.w3.org/2000/svg","line");
-    l.setAttribute("x1",x1); l.setAttribute("y1",y1);
-    l.setAttribute("x2",x2); l.setAttribute("y2",y2);
+    l.setAttribute("x1",Math.round(x1)); l.setAttribute("y1",Math.round(y1));
+    l.setAttribute("x2",Math.round(x2)); l.setAttribute("y2",Math.round(y2));
     l.setAttribute("class",cls); l.setAttribute("vector-effect","non-scaling-stroke");
     svg.appendChild(l);
-    return l;
   };
-  const path=(d,cls="")=>{
-    const el=document.createElementNS("http://www.w3.org/2000/svg","path");
-    el.setAttribute("d",d); el.setAttribute("class",cls);
-    el.setAttribute("vector-effect","non-scaling-stroke");
-    el.setAttribute("fill","none");
-    svg.appendChild(el);
-    return el;
-  };
-
   const center=p=>({x:p.x+NODE_W/2,y:p.y+NODE_H/2});
-  const top=p=>p.y;
   const bottom=p=>p.y+NODE_H;
-  const coupleKey=(a,b)=>[a,b].sort().join("|");
-  const doneCouples=new Set();
-  const doneSiblingBars=new Set();
 
-  // 1) Vợ/chồng: đường ngang liền, đúng giữa hai khung.
+  // 1) Vợ/chồng: đúng một đường ngang, giữa hai khung.
+  const doneCouples=new Set();
   people.forEach(p=>{
     if(!p.spouse||!positions[p.id]||!positions[p.spouse])return;
-    const key=coupleKey(p.id,p.spouse);
-    if(doneCouples.has(key))return;
-    doneCouples.add(key);
-    const a=positions[p.id], b=positions[p.spouse];
-    const left=a.x<b.x?a:b, right=a.x<b.x?b:a;
-    line(left.x+NODE_W, left.y+NODE_H/2, right.x, right.y+NODE_H/2, "connector-spouse");
+    const key=groupKey(p.id,p.spouse); if(doneCouples.has(key))return; doneCouples.add(key);
+    const a=positions[p.id],b=positions[p.spouse];
+    const left=a.x<b.x?a:b,right=a.x<b.x?b:a;
+    line(left.x+NODE_W,left.y+NODE_H/2,right.x,right.y+NODE_H/2,"connector-spouse");
   });
 
-  // 2 + 3) Nối cha mẹ -> thanh anh/chị/em -> từng người con.
-  // Các đoạn đều bắt đầu/kết thúc ĐÚNG tại mép khung hoặc tại điểm giao,
-  // nên nhìn thành một hệ thống đường liền mạch, không có khoảng hở.
-  const processedParentGroups=new Set();
-  people.forEach(parent=>{
-    const spouse=parent.spouse?get(parent.spouse):null;
-    const parentIds=spouse&&positions[spouse.id] ? [parent.id,spouse.id] : [parent.id];
-    const validParentIds=parentIds.filter(id=>positions[id]);
-    if(!validParentIds.length)return;
-
-    const kids=childrenOf(parent.id).filter(k=>positions[k.id]);
+  // 2) Cha mẹ -> thanh anh/chị/em -> con. Tất cả chỉ ngang/dọc.
+  groups.forEach(g=>{
+    const kids=[...g.children].filter(c=>c.ids.some(id=>positions[id]));
     if(!kids.length)return;
+    const parentIds=g.ids.filter(id=>positions[id]);
+    const parentCenters=parentIds.map(id=>center(positions[id]).x);
+    const parentCenter=parentCenters.reduce((a,b)=>a+b,0)/parentCenters.length;
+    const parentBottom=Math.max(...parentIds.map(id=>bottom(positions[id])));
+    const childCenters=kids.map(c=>{
+      const xs=c.ids.map(id=>center(positions[id]).x);
+      return xs.reduce((a,b)=>a+b,0)/xs.length;
+    }).sort((a,b)=>a-b);
+    const childTop=Math.min(...kids.flatMap(c=>c.ids.map(id=>positions[id].y)));
+    const yMid=Math.round(parentBottom+(childTop-parentBottom)/2);
+    const barLeft=childCenters[0],barRight=childCenters[childCenters.length-1];
 
-    const key=validParentIds.slice().sort().join("|");
-    if(processedParentGroups.has(key))return;
-    processedParentGroups.add(key);
-
-    // Tâm ngang của cặp vợ/chồng (hoặc cha/mẹ đơn thân).
-    const parentXs=validParentIds.map(id=>center(positions[id]).x).sort((a,b)=>a-b);
-    const junctionX=parentXs.length===2 ? (parentXs[0]+parentXs[1])/2 : parentXs[0];
-    const parentBottom=Math.max(...validParentIds.map(id=>bottom(positions[id])));
-    const childTop=Math.min(...kids.map(k=>top(positions[k.id])));
-
-    // Thanh anh/chị/em nằm chính giữa khoảng trống giữa hai thế hệ.
-    const siblingY=Math.round(parentBottom+(childTop-parentBottom)/2);
-    const childXs=[...new Set(kids.map(k=>center(positions[k.id]).x))].sort((a,b)=>a-b);
-
-    // Đường dọc từ giữa cặp vợ/chồng xuống thanh anh/chị/em.
-    // Bắt đầu tại MÉP DƯỚI khung để không bị cảm giác đứt đoạn.
-    line(junctionX,parentBottom,junctionX,siblingY,"connector-family");
-
-    // Thanh ngang chung cho toàn bộ anh/chị/em.
-    const barLeft=childXs[0], barRight=childXs[childXs.length-1];
-    if(barLeft===barRight){
-      // Một người con: thanh ngang không cần kéo dài, chỉ cần điểm nối.
-      line(junctionX,siblingY,barLeft,siblingY,"connector-family");
-    }else{
-      line(barLeft,siblingY,barRight,siblingY,"connector-family");
-      // Nối điểm dọc của cha mẹ vào thanh ngang nếu nó không nằm đúng đầu thanh.
-      if(junctionX<barLeft || junctionX>barRight){
-        line(junctionX,siblingY,barLeft===junctionX?barRight:barLeft,siblingY,"connector-family");
-      }
-    }
-
-    // Mỗi con có một đường dọc liền từ thanh ngang tới MÉP TRÊN khung.
-    childXs.forEach(cx=>line(cx,siblingY,cx,childTop,"connector-family"));
+    line(parentCenter,parentBottom,parentCenter,yMid,"connector-family");
+    if(Math.abs(barRight-barLeft)>0) line(barLeft,yMid,barRight,yMid,"connector-family");
+    else line(parentCenter,yMid,barLeft,yMid,"connector-family");
+    childCenters.forEach(cx=>line(cx,yMid,cx,childTop,"connector-family"));
   });
 
-  // Trường hợp chỉ biết một cha/mẹ và người đó không có spouse.
-  people.forEach(child=>{
-    if(!positions[child.id])return;
-    const parents=[child.father,child.mother].filter(id=>id&&get(id)&&positions[id]);
-    if(parents.length!==1)return;
-    const parent=get(parents[0]);
-    if(parent.spouse&&get(parent.spouse)&&positions[parent.spouse])return;
-    const pp=positions[parent.id], cp=positions[child.id];
-    const px=center(pp).x, py=bottom(pp);
-    const cx=center(cp).x, cy=top(cp);
-    const mid=Math.round(py+(cy-py)/2);
-    line(px,py,px,mid,"connector-family");
-    line(Math.min(px,cx),mid,Math.max(px,cx),mid,"connector-family");
-    line(cx,mid,cx,cy,"connector-family");
-  });
-
-  // Card người: giữ nguyên giao diện đẹp, avatar, tên và thao tác chọn/sửa.
+  // 3) Card người: giữ nguyên giao diện và thao tác.
   people.forEach(p=>{
     const pos=positions[p.id]; if(!pos)return;
     const id=p.id;
@@ -382,37 +347,18 @@ function renderTree(){
     el.className="tree-card"+(id===selectedId?" selected":"");
     el.style.left=pos.x+"px"; el.style.top=pos.y+"px";
     el.innerHTML=`<div class="avatar">${avatar(p)}</div><div><strong>${esc(p.nickname||p.name)}</strong><small>${esc(p.name)}${p.birth?` • ${p.birth}`:""}</small></div>`;
-
     let downX=0,downY=0;
     el.addEventListener("pointerdown",e=>{
-      downX=e.clientX; downY=e.clientY;
-      drag.on=true; drag.moved=false; drag.cardId=id; drag.x=e.clientX; drag.y=e.clientY;
-      drag.sl=drag.l; drag.st=drag.t;
-      el.setPointerCapture?.(e.pointerId);
+      downX=e.clientX;downY=e.clientY;drag.on=true;drag.moved=false;drag.cardId=id;drag.x=e.clientX;drag.y=e.clientY;drag.sl=drag.l;drag.st=drag.t;el.setPointerCapture?.(e.pointerId);
     });
-    el.addEventListener("pointermove",e=>{
-      if(!drag.on||drag.cardId!==id)return;
-      const dx=e.clientX-drag.x, dy=e.clientY-drag.y;
-      if(Math.abs(e.clientX-downX)>5||Math.abs(e.clientY-downY)>5)drag.moved=true;
-      drag.l=drag.sl+dx; drag.t=drag.st+dy; applyTreeTransform();
-    });
-    el.addEventListener("pointerup",e=>{
-      if(!drag.on||drag.cardId!==id)return;
-      const moved=drag.moved||Math.abs(e.clientX-downX)>5||Math.abs(e.clientY-downY)>5;
-      drag.on=false; drag.cardId="";
-      if(moved)return;
-      selectedId=id;
-      const target=positions[id];
-      const vw=$("#treeViewport").clientWidth,vh=$("#treeViewport").clientHeight;
-      drag.l=vw/2-(target.x+NODE_W/2)*scale;
-      drag.t=vh/2-(target.y+NODE_H/2)*scale;
-      renderAll(true);
-    });
-    el.ondblclick=e=>{e.stopPropagation();openModal(id)};
+    el.addEventListener("pointermove",e=>{if(!drag.on||drag.cardId!==id)return;const dx=e.clientX-downX,dy=e.clientY-downY;if(Math.hypot(dx,dy)>5)drag.moved=true;drag.l=drag.sl+dx;drag.t=drag.st+dy;applyTreeTransform();});
+    el.addEventListener("pointerup",e=>{if(!drag.on||drag.cardId!==id)return;const moved=drag.moved;drag.on=false;drag.cardId=null;if(!moved){selectedId=id;renderAll(true);}});
+    el.addEventListener("dblclick",()=>openPersonModal(id));
     canvas.appendChild(el);
   });
   applyTreeTransform();
 }
+
 function renderAll(autoRelation=false){renderTree();renderProfile();renderSelects(autoRelation);if(autoRelation)renderAutoRelation();else $("#relationResult").innerHTML="";}
 
 function fillSelect(id, current){
