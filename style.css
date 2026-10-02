@@ -10,3 +10,7 @@
 .callout-label{font-size:10px;font-weight:800;letter-spacing:.7px;color:var(--primary);margin-bottom:6px}
 .callout-main{font-size:14px;line-height:1.5}.callout-main strong{display:block;font-size:23px;color:var(--primary);margin-top:2px}
 @media(max-width:700px){.tree-viewport{height:65vh;min-height:430px}.layout{overflow:visible}.relation-panel{order:0}.profile-panel{order:1}}
+.spouse-connector{background:#b9aef5;height:3px}
+
+.relation-help{margin-top:8px;text-align:center}
+.profile-actions .full{margin-top:0}

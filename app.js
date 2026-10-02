@@ -12,6 +12,7 @@ const sample=[
 {id:"cousin",name:"Anh họ",nickname:"Anh",gender:"male",birth:2004,father:"uncle",mother:"auntInLaw",spouse:"",birthOrder:1,notes:"Con của chú"}
 ];
 let people=load(), selectedId="me", scale=1, drag={on:false,x:0,y:0,l:0,t:0};
+let modalPhoto="";
 
 function load(){try{return JSON.parse(localStorage.getItem(KEY))||sample}catch{return sample}}
 function save(){localStorage.setItem(KEY,JSON.stringify(people))}
@@ -117,11 +118,29 @@ function elderRelativeTerm(parent,target){
   return sameGender?"cô/dì":"chú";
 }
 
-function renderSelects(){
+function renderSelects(autoTarget=false){
   const opts=people.map(p=>`<option value="${p.id}">${esc(p.nickname||p.name)}</option>`).join("");
-  $("#mainPerson").innerHTML=opts;$("#targetPerson").innerHTML=opts;
-  $("#mainPerson").value=selectedId;
-  if(!$("#targetPerson").value||$("#targetPerson").value===selectedId) $("#targetPerson").value=people.find(p=>p.id!==selectedId)?.id||selectedId;
+  $("#mainPerson").innerHTML=opts;
+  $("#targetPerson").innerHTML=opts;
+
+  // Mặc định nhân vật chính là "Tôi". Khi bấm một người trên cây, người đó
+  // tự trở thành đối tượng để xem cách xưng hô. Nếu người dùng tự đổi dropdown,
+  // kết quả sẽ chỉ thay đổi sau khi bấm nút "Tính cách xưng hô".
+  const me=people.find(p=>normalizeText(p.nickname||"")==="toi" || normalizeText(p.name||"")==="toi") || get("me");
+  const mainId=me?.id || people[0]?.id || "";
+  $("#mainPerson").value=mainId;
+  if(autoTarget){
+    $("#targetPerson").value=selectedId || (people.find(p=>p.id!==mainId)?.id || mainId);
+  }else if(!$("#targetPerson").value){
+    $("#targetPerson").value=people.find(p=>p.id!==mainId)?.id || mainId;
+  }
+}
+function renderAutoRelation(){
+  const a=$("#mainPerson").value;
+  const b=$("#targetPerson").value;
+  if(!a||!b){$("#relationResult").innerHTML="";return}
+  const r=relationship(a,b), names=r.path.map(get).filter(Boolean);
+  $("#relationResult").innerHTML=`<div class="relation-path"><div class="path-title">Đường quan hệ</div><div class="path">${names.map((p,i)=>`<span>${esc(p.nickname||p.name)}</span>${i<names.length-1?"→":""}`).join("")}</div></div><div class="answer"><small>${esc(get(a)?.nickname||get(a)?.name)} gọi ${esc(get(b)?.nickname||get(b)?.name)} là</small><strong>${esc(r.title)}</strong></div>`;
 }
 function renderProfile(){
   const p=get(selectedId);if(!p){$("#profile").innerHTML='<div class="empty">Chưa chọn người.</div>';return}
@@ -146,70 +165,159 @@ function renderProfile(){
     <div class="family-list"><h4>VỢ / CHỒNG</h4>${p.spouse?personRow(get(p.spouse)):"<div class='muted'>Chưa khai báo</div>"}</div>
     <div class="family-list"><h4>CON (${kids.length})</h4>${kids.length?kids.map(personRow).join(""):"<div class='muted'>Chưa khai báo</div>"}</div>
     <div class="family-list"><h4>ANH / CHỊ / EM</h4>${siblings.length?siblings.map(personRow).join(""):"<div class='muted'>Chưa xác định</div>"}</div>
-    <button id="editSelected" class="ghost full" style="margin-top:14px">✎ Chỉnh sửa người này</button>
+    <div class="profile-actions">
+      <button id="editSelected" class="ghost full">✎ Đổi tên / sửa thông tin</button>
+      <button id="changeAvatarSelected" class="ghost full">📷 Đổi ảnh avatar</button>
+    </div>
+    <input id="quickAvatarInput" class="hidden" type="file" accept="image/*">
   </div>`;
   $("#editSelected").onclick=()=>openModal(p.id);
-  $("#addRelated").onclick=()=>openRelationModal(p.id);
+  $("#changeAvatarSelected").onclick=()=>$("#quickAvatarInput").click();
+  $("#quickAvatarInput").onchange=e=>{
+    const f=e.target.files?.[0];
+    if(!f)return;
+    const r=new FileReader();
+    r.onload=()=>{
+      const person=get(p.id);
+      if(!person)return;
+      person.photo=r.result;
+      save();
+      renderAll();
+    };
+    r.readAsDataURL(f);
+  };
 }
 function personRow(p){return p?`<div class="family-item" data-person="${p.id}"><div class="mini">${avatar(p)}</div><span>${esc(p.name)}</span></div>`:""}
+function applyTreeTransform(){
+  const canvas=document.querySelector("#treeCanvas");
+  if(canvas) canvas.style.transform=`translate(${drag.l}px,${drag.t}px) scale(${scale})`;
+}
+
 function renderTree(){
-  const canvas=$("#treeCanvas");canvas.innerHTML="";
-  const center=get(selectedId)||people[0];
+  const canvas=$("#treeCanvas");
+  canvas.innerHTML="";
+  if(!people.length)return;
+
+  // Luôn vẽ TOÀN BỘ gia phả. Việc chọn một người chỉ thay đổi người đang xem,
+  // không cắt sơ đồ thành một cây riêng.
+  const root=get("me")||people[0];
   const generations={};
-  function add(id,gen){if(!id||!get(id))return;if(!generations[gen])generations[gen]=[];if(!generations[gen].includes(id))generations[gen].push(id)}
-  add(center.id,0);
-  parentsOf(center.id).forEach(p=>add(p.id,-1));
-  parentsOf(center.id).flatMap(par=>parentsOf(par.id)).forEach(p=>add(p.id,-2));
-  childrenOf(center.id).forEach(c=>add(c.id,1));
-  childrenOf(center.id).flatMap(c=>childrenOf(c.id)).forEach(c=>add(c.id,2));
-  siblingsOf(center.id).forEach(s=>add(s.id,0));
-  siblingsOf(center.id).flatMap(s=>childrenOf(s.id)).forEach(c=>add(c.id,1));
-  const ids=[...new Set(Object.values(generations).flat())];
-  const positions={}; const W=210,H=120;
-  Object.keys(generations).sort((a,b)=>a-b).forEach(g=>{
-    const arr=generations[g], total=arr.length*W;
-    const start=Math.max(40,(1000-total)/2);
-    arr.forEach((id,i)=>{positions[id]={x:start+i*W,y:(Number(g)+2)*H+40}})
+  const gen=new Map();
+  const queue=[];
+  const put=(id,g)=>{
+    if(!id||!get(id))return;
+    if(!gen.has(id)){
+      gen.set(id,g); queue.push(id);
+    }
+  };
+  put(root.id,0);
+
+  while(queue.length){
+    const id=queue.shift(), g=gen.get(id), p=get(id);
+    [p.father,p.mother].filter(Boolean).forEach(x=>put(x,g-1));
+    childrenOf(id).forEach(x=>put(x.id,g+1));
+    if(p.spouse)put(p.spouse,g);
+    siblingsOf(id).forEach(x=>put(x.id,g));
+  }
+
+  // Nếu có người chưa nối với gốc, vẫn đưa họ vào cùng một sơ đồ.
+  people.forEach(p=>{if(!gen.has(p.id))put(p.id,0)});
+
+  gen.forEach((g,id)=>{
+    if(!generations[g])generations[g]=[];
+    generations[g].push(id);
   });
+
+  const positions={};
+  const W=210,H=125;
+  const allRows=Object.keys(generations).map(Number);
+  const minG=Math.min(...allRows), maxG=Math.max(...allRows);
+  const canvasWidth=Math.max(1100, ...allRows.map(g=>generations[g].length*W+120));
+
+  Object.keys(generations).sort((a,b)=>Number(a)-Number(b)).forEach(g=>{
+    const arr=generations[g];
+    // Giữ vợ/chồng gần nhau khi có thể.
+    arr.sort((a,b)=>{
+      const pa=get(a),pb=get(b);
+      if(pa.spouse===b)return -1;
+      if(pb.spouse===a)return 1;
+      return (pa.birthOrder||99)-(pb.birthOrder||99);
+    });
+    const total=arr.length*W;
+    const start=Math.max(40,(canvasWidth-total)/2);
+    arr.forEach((id,i)=>{
+      positions[id]={x:start+i*W,y:(Number(g)-minG)*H+50};
+    });
+  });
+
+  canvas.style.width=canvasWidth+"px";
+  canvas.style.height=((maxG-minG+1)*H+120)+"px";
+
   const lines=[];
-  ids.forEach(id=>{
-    const p=get(id), from=positions[id];
-    [p.father,p.mother].filter(x=>x&&positions[x]).forEach(pid=>lines.push([positions[pid],from]));
+  people.forEach(p=>{
+    const child=positions[p.id];
+    if(!child)return;
+    [p.father,p.mother].filter(x=>x&&positions[x]).forEach(pid=>lines.push({a:positions[pid],b:child,type:"parent"}));
+    if(p.spouse && p.id < p.spouse && positions[p.spouse]){
+      lines.push({a:positions[p.id],b:positions[p.spouse],type:"spouse"});
+    }
   });
-  lines.forEach(([a,b])=>{const x1=a.x+90,y1=a.y+44,x2=b.x+90,y2=b.y;const dx=x2-x1,dy=y2-y1,len=Math.hypot(dx,dy),ang=Math.atan2(dy,dx);const el=document.createElement("div");el.className="connector";el.style.left=x1+"px";el.style.top=y1+"px";el.style.width=len+"px";el.style.transform=`rotate(${ang}rad)`;canvas.appendChild(el)});
-  ids.forEach(id=>{
-    const p=get(id),pos=positions[id],el=document.createElement("div");el.className="tree-card"+(id===selectedId?" selected":"");el.style.left=pos.x+"px";el.style.top=pos.y+"px";
+
+  lines.forEach(({a,b,type})=>{
+    const x1=a.x+90,y1=type==="spouse"?a.y+44:a.y+88;
+    const x2=b.x+90,y2=type==="spouse"?b.y+44:b.y;
+    const dx=x2-x1,dy=y2-y1,len=Math.hypot(dx,dy),ang=Math.atan2(dy,dx);
+    const el=document.createElement("div");
+    el.className="connector"+(type==="spouse"?" spouse-connector":"");
+    el.style.left=x1+"px";el.style.top=y1+"px";el.style.width=len+"px";
+    el.style.transform=`rotate(${ang}rad)`;
+    canvas.appendChild(el);
+  });
+
+  people.forEach(p=>{
+    const pos=positions[p.id];
+    if(!pos)return;
+    const id=p.id;
+    const el=document.createElement("div");
+    el.className="tree-card"+(id===selectedId?" selected":"");
+    el.style.left=pos.x+"px";el.style.top=pos.y+"px";
     el.innerHTML=`<div class="avatar">${avatar(p)}</div><div><strong>${esc(p.nickname||p.name)}</strong><small>${esc(p.name)}${p.birth?` • ${p.birth}`:""}</small></div>`;
-    // Có thể kéo sơ đồ bắt đầu ngay trên thẻ. Nếu chỉ bấm nhẹ thì mới chọn/phóng to.
+
+    let downX=0,downY=0,downTime=0;
     el.addEventListener("pointerdown",e=>{
-      drag.on=true;drag.moved=false;drag.cardId=id;drag.x=e.clientX;drag.y=e.clientY;drag.sl=drag.l;drag.st=drag.t;
+      downX=e.clientX;downY=e.clientY;downTime=Date.now();
+      drag.on=true;drag.moved=false;drag.cardId=id;drag.x=e.clientX;drag.y=e.clientY;
+      drag.sl=drag.l;drag.st=drag.t;
       el.setPointerCapture?.(e.pointerId);
     });
     el.addEventListener("pointermove",e=>{
-      if(!drag.on)return;
+      if(!drag.on||drag.cardId!==id)return;
       const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
-      if(Math.abs(dx)>5||Math.abs(dy)>5)drag.moved=true;
+      if(Math.abs(e.clientX-downX)>5||Math.abs(e.clientY-downY)>5)drag.moved=true;
       drag.l=drag.sl+dx;drag.t=drag.st+dy;
-      renderTree();
+      applyTreeTransform();
     });
     el.addEventListener("pointerup",e=>{
-      if(!drag.on)return;
-      const moved=drag.moved;drag.on=false;drag.cardId="";
-      if(moved){e.preventDefault();return;}
+      if(!drag.on||drag.cardId!==id)return;
+      const moved=drag.moved || Math.abs(e.clientX-downX)>5 || Math.abs(e.clientY-downY)>5;
+      drag.on=false;drag.cardId="";
+      if(moved)return;
+
       selectedId=id;
+      // Bấm người nào thì phóng to người đó, nhưng vẫn giữ nguyên TOÀN BỘ cây.
       const target=positions[id];
-      scale=Math.min(1.7,Math.max(1.18,scale+.18));
-      const vw=$("#treeViewport").clientWidth, vh=$("#treeViewport").clientHeight;
+      scale=Math.min(1.55,Math.max(1.08,scale+0.12));
+      const vw=$("#treeViewport").clientWidth,vh=$("#treeViewport").clientHeight;
       drag.l=vw/2-(target.x+90)*scale;
       drag.t=vh/2-(target.y+44)*scale;
-      renderAll();
+      renderAll(true);
     });
     el.ondblclick=e=>{e.stopPropagation();openModal(id)};
     canvas.appendChild(el);
   });
-  canvas.style.transform=`translate(${drag.l}px,${drag.t}px) scale(${scale})`;
+  applyTreeTransform();
 }
-function renderAll(){renderTree();renderProfile();renderSelects();$("#relationResult").innerHTML="";}
+function renderAll(autoRelation=false){renderTree();renderProfile();renderSelects(autoRelation);if(autoRelation)renderAutoRelation();else $("#relationResult").innerHTML="";}
 
 function fillSelect(id, current){
   const el=$(id);el.innerHTML='<option value="">— Không có —</option>'+people.filter(p=>p.id!==current).map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join("");
@@ -260,11 +368,12 @@ function openModal(id=""){
   ["name","nickname","birth","job","hometown","birthOrder","notes"].forEach(k=>$("#"+k).value=p[k]??"");
   $("#gender").value=p.gender||"male";fillSelect("#father",id);fillSelect("#mother",id);fillSelect("#spouse",id);
   $("#father").value=p.father||"";$("#mother").value=p.mother||"";$("#spouse").value=p.spouse||"";
+  modalPhoto=p.photo||"";
   $("#avatarPreview").innerHTML=avatar(p);
 }
 function closeModal(){$("#modal").classList.add("hidden")}
 $("#addPersonBtn").onclick=()=>openModal();$("#closeModal").onclick=closeModal;$("#cancelBtn").onclick=closeModal;
-$("#personForm").onsubmit=e=>{e.preventDefault();const id=$("#personId").value||crypto.randomUUID();let old=get(id);const p={id,name:$("#name").value.trim(),nickname:$("#nickname").value.trim(),gender:$("#gender").value,birth:Number($("#birth").value)||"",job:$("#job").value.trim(),hometown:$("#hometown").value.trim(),father:$("#father").value,mother:$("#mother").value,spouse:$("#spouse").value,birthOrder:Number($("#birthOrder").value)||"",notes:$("#notes").value.trim(),photo:old?.photo||""};if(!p.name)return;if(old)Object.assign(old,p);else people.push(p);if(p.spouse){const s=get(p.spouse);if(s)s.spouse=p.id}save();selectedId=id;closeModal();renderAll()};
+$("#personForm").onsubmit=e=>{e.preventDefault();const id=$("#personId").value||crypto.randomUUID();let old=get(id);const p={id,name:$("#name").value.trim(),nickname:$("#nickname").value.trim(),gender:$("#gender").value,birth:Number($("#birth").value)||"",job:$("#job").value.trim(),hometown:$("#hometown").value.trim(),father:$("#father").value,mother:$("#mother").value,spouse:$("#spouse").value,birthOrder:Number($("#birthOrder").value)||"",notes:$("#notes").value.trim(),photo:modalPhoto||old?.photo||""};if(!p.name)return;if(old)Object.assign(old,p);else people.push(p);if(p.spouse){const s=get(p.spouse);if(s)s.spouse=p.id}save();selectedId=id;closeModal();renderAll()};
 $("#deletePersonBtn").onclick=()=>{const id=$("#personId").value;if(!id)return;if(!confirm("Xóa người này?"))return;people=people.filter(p=>p.id!==id);people.forEach(p=>{if(p.father===id)p.father="";if(p.mother===id)p.mother="";if(p.spouse===id)p.spouse=""});selectedId=people[0]?.id||"";save();closeModal();renderAll()};
 $("#photo").onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{$("#avatarPreview").innerHTML=`<img src="${r.result}">`;const id=$("#personId").value;if(id){get(id).photo=r.result;save()}};r.readAsDataURL(f)};
 $("#mainPerson").onchange=e=>{selectedId=e.target.value;renderTree();renderProfile()};
@@ -358,7 +467,7 @@ $("#treeViewport").addEventListener("pointermove",e=>{
   if(!drag.on)return;
   const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
   if(Math.abs(dx)>3||Math.abs(dy)>3)drag.moved=true;
-  drag.l=drag.sl+dx;drag.t=drag.st+dy;renderTree();
+  drag.l=drag.sl+dx;drag.t=drag.st+dy;applyTreeTransform();
 });
 $("#treeViewport").addEventListener("pointerup",()=>{drag.on=false;drag.cardId=""});
 $("#treeViewport").addEventListener("pointercancel",()=>{drag.on=false;drag.cardId=""});
