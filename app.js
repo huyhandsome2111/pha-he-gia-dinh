@@ -372,32 +372,113 @@ function updateSelectionFrame(dx=0,dy=0){
 }
 
 function updateDragConnectors(ids,dx,dy){
-  const canvas=document.querySelector("#treeCanvas");
-  if(!canvas)return;
+  const canvas=document.querySelector('#treeCanvas');
+  const svg=canvas?.querySelector('.family-connectors');
+  if(!canvas||!svg)return;
+
+  // Rebuild connector geometry from the live card positions instead of moving
+  // line endpoints independently. This keeps pedigree connectors orthogonal
+  // (horizontal/vertical) and prevents accidental diagonal/gấp-khúc lines
+  // during manual dragging.
   const moving=new Set(ids);
-  canvas.querySelectorAll(".family-connectors line").forEach(line=>{
-    const shift=(raw)=>{
-      if(!raw)return [0,0];
-      let refs=[];try{refs=JSON.parse(raw)}catch{return [0,0]}
-      const hit=refs.filter(id=>moving.has(id)).length;
-      if(!hit)return [0,0];
-      const ratio=hit/Math.max(1,refs.length);
-      return [dx*ratio,dy*ratio];
-    };
-    const a=shift(line.dataset.a), b=shift(line.dataset.b);
-    const ox1=parseFloat(line.dataset.baseX1??line.getAttribute("x1"));
-    const oy1=parseFloat(line.dataset.baseY1??line.getAttribute("y1"));
-    const ox2=parseFloat(line.dataset.baseX2??line.getAttribute("x2"));
-    const oy2=parseFloat(line.dataset.baseY2??line.getAttribute("y2"));
-    if(!line.dataset.baseX1){
-      line.dataset.baseX1=ox1;line.dataset.baseY1=oy1;
-      line.dataset.baseX2=ox2;line.dataset.baseY2=oy2;
-    }
-    line.setAttribute("x1",Math.round(ox1+a[0]));
-    line.setAttribute("y1",Math.round(oy1+a[1]));
-    line.setAttribute("x2",Math.round(ox2+b[0]));
-    line.setAttribute("y2",Math.round(oy2+b[1]));
+  const live={};
+  people.forEach(p=>{
+    const el=canvas.querySelector(`[data-card-id="${p.id}"]`);
+    if(!el)return;
+    const baseX=parseFloat(el.style.left)||0;
+    const baseY=parseFloat(el.style.top)||0;
+    const dd=moving.has(p.id)?[dx,dy]:[0,0];
+    live[p.id]={x:baseX+dd[0],y:baseY+dd[1]};
   });
+
+  const nodeW = window.innerWidth<=700 ? 128 : 160;
+  const nodeH = window.innerWidth<=700 ? 66 : 78;
+  const coupleGap = window.innerWidth<=700 ? 14 : 24;
+  const used=new Set();
+  const groups=[];
+  const groupByPerson=new Map();
+  const keyOf=(a,b)=>[a,b].filter(Boolean).sort().join('|');
+
+  for(const p of people){
+    if(used.has(p.id)||!live[p.id])continue;
+    const spouse=(p.spouse&&get(p.spouse)&&p.spouse!==p.id&&live[p.spouse])?get(p.spouse):null;
+    const ids2=spouse?[p.id,spouse.id]:[p.id];
+    const g={key:keyOf(...ids2),ids:ids2,children:[],parents:new Set()};
+    groups.push(g);
+    ids2.forEach(id=>{used.add(id);groupByPerson.set(id,g)});
+  }
+  const addChild=(pg,cg,id)=>{
+    if(!pg||!cg||pg===cg)return;
+    if(pg.children.some(c=>c.childId===id))return;
+    pg.children.push({group:cg,childId:id});
+    cg.parents.add(pg);
+  };
+  for(const child of people){
+    const cg=groupByPerson.get(child.id);
+    if(!cg)continue;
+    for(const pid of [child.father,child.mother].filter(Boolean)){
+      const pg=groupByPerson.get(pid);
+      addChild(pg,cg,child.id);
+    }
+  }
+  const centerX=id=>live[id].x+nodeW/2;
+  const topY=id=>live[id].y;
+  const bottomY=id=>live[id].y+nodeH;
+  const spouseGap=g=>g.ids.length===2?coupleGap:0;
+
+  svg.innerHTML='';
+  const line=(x1,y1,x2,y2,cls)=>{
+    const l=document.createElementNS('http://www.w3.org/2000/svg','line');
+    l.setAttribute('x1',Math.round(x1));l.setAttribute('y1',Math.round(y1));
+    l.setAttribute('x2',Math.round(x2));l.setAttribute('y2',Math.round(y2));
+    l.setAttribute('class',cls);
+    svg.appendChild(l);
+  };
+  // Pedigree routing: ONLY horizontal/vertical segments. Never draw a diagonal.
+  const orthogonal=(x1,y1,x2,y2,cls)=>{
+    const ax=Math.round(x1), ay=Math.round(y1), bx=Math.round(x2), by=Math.round(y2);
+    if(ax===bx){ line(ax,ay,bx,by,cls); return; }
+    if(ay===by){ line(ax,ay,bx,by,cls); return; }
+    const midY=Math.round((ay+by)/2);
+    line(ax,ay,ax,midY,cls);
+    line(ax,midY,bx,midY,cls);
+    line(bx,midY,bx,by,cls);
+  };
+
+  // Marriage lines.
+  for(const g of groups){
+    if(g.ids.length!==2)continue;
+    const a=live[g.ids[0]],b=live[g.ids[1]];
+    const left=g.ids[0]===g.ids[0] && a.x<=b.x?g.ids[0]:g.ids[1];
+    const right=left===g.ids[0]?g.ids[1]:g.ids[0];
+    const ax=live[left].x+nodeW, ay=live[left].y+nodeH/2;
+    const bx=live[right].x, by=live[right].y+nodeH/2;
+    orthogonal(ax,ay,bx,by,'connector-spouse');
+  }
+
+  // Parent -> children, always orthogonal. The parent join is the midpoint of
+  // the actual couple; no diagonal fallback is used.
+  for(const pg of groups){
+    const children=pg.children.filter(c=>live[c.childId]);
+    if(!children.length)continue;
+    const parentJoinX=pg.ids.length===2
+      ? (centerX(pg.ids[0])+centerX(pg.ids[1]))/2
+      : centerX(pg.ids[0]);
+    const parentBottom=Math.max(...pg.ids.map(bottomY));
+    const ordered=children.slice().sort((a,b)=>centerX(a.childId)-centerX(b.childId));
+    const childTop=Math.min(...ordered.map(c=>topY(c.childId)));
+
+    if(ordered.length===1){
+      orthogonal(parentJoinX,parentBottom,centerX(ordered[0].childId),childTop,'connector-parent');
+      continue;
+    }
+    const barY=Math.round(parentBottom+(childTop-parentBottom)*0.5);
+    const firstX=centerX(ordered[0].childId);
+    const lastX=centerX(ordered[ordered.length-1].childId);
+    line(parentJoinX,parentBottom,parentJoinX,barY,'connector-parent');
+    line(firstX,barY,lastX,barY,'connector-siblings');
+    ordered.forEach(c=>line(centerX(c.childId),barY,centerX(c.childId),topY(c.childId),'connector-parent'));
+  }
 }
 
 function applyTreeTransform(){
@@ -672,6 +753,15 @@ function renderTree(){
     if(meta.a)l.dataset.a=JSON.stringify(meta.a);if(meta.b)l.dataset.b=JSON.stringify(meta.b);
     svg.appendChild(l);return l;
   };
+  // STRICT pedigree router: every connector segment is horizontal OR vertical.
+  const orthogonal=(x1,y1,x2,y2,cls="connector-parent",meta={})=>{
+    const ax=Math.round(x1), ay=Math.round(y1), bx=Math.round(x2), by=Math.round(y2);
+    if(ax===bx || ay===by){return line(ax,ay,bx,by,cls,meta);}
+    const midY=Math.round((ay+by)/2);
+    line(ax,ay,ax,midY,cls,meta);
+    line(ax,midY,bx,midY,cls,meta);
+    return line(bx,midY,bx,by,cls,meta);
+  };
   const centerX=id=>positions[id].x+NODE_W/2;
   const topY=id=>positions[id].y;
   const bottomY=id=>positions[id].y+NODE_H;
@@ -681,18 +771,12 @@ function renderTree(){
     if(g.ids.length!==2)continue;
     const a=positions[g.ids[0]],b=positions[g.ids[1]];
     const left=a.x<=b.x?a:b,right=a.x<=b.x?b:a;
-    line(left.x+NODE_W,left.y+NODE_H/2,right.x,right.y+NODE_H/2,"connector-spouse",{a:[left===a?g.ids[0]:g.ids[1]],b:[right===b?g.ids[1]:g.ids[0]]});
+    const leftId=left===a?g.ids[0]:g.ids[1], rightId=right===b?g.ids[1]:g.ids[0];
+    orthogonal(left.x+NODE_W,left.y+NODE_H/2,right.x,right.y+NODE_H/2,"connector-spouse",{a:[leftId],b:[rightId]});
   }
 
-  // Helper vẽ cha/mẹ -> con dạng orthogonal. Nếu parentJoinX không thẳng với con,
-  // tạo một đoạn ngang ngắn ở giữa thay vì phá cấu trúc.
-  const parentPath=(x1,y1,x2,y2,cls,meta)=>{
-    if(Math.abs(x1-x2)<1){line(x1,y1,x2,y2,cls,meta);return;}
-    const mid=Math.round(y1+(y2-y1)*0.5);
-    line(x1,y1,x1,mid,cls,meta);
-    line(x1,mid,x2,mid,cls,meta);
-    line(x2,mid,x2,y2,cls,meta);
-  };
+  // Cha/mẹ -> con: strictly horizontal/vertical, never diagonal.
+  const parentPath=(x1,y1,x2,y2,cls,meta)=>orthogonal(x1,y1,x2,y2,cls,meta);
 
   // ② Cha/mẹ -> nhóm con. children chứa childId cụ thể nên nhánh nội/ngoại
   // chỉ chạm đúng Ba hoặc Mẹ, không chạm cả cặp Ba-Mẹ.
