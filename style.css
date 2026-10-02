@@ -14,3 +14,17 @@
 
 .relation-help{margin-top:8px;text-align:center}
 .profile-actions .full{margin-top:0}
+
+/* Kiểu sơ đồ phả hệ sinh học */
+.tree-canvas{transform-origin:0 0}
+.pedigree-lines{position:absolute;left:0;top:0;overflow:visible;z-index:0;pointer-events:none}
+.pedigree-lines line{stroke:#4d5562;stroke-width:2;fill:none}
+.pedigree-marriage{stroke-width:2.5!important}
+.pedigree-person{position:absolute;width:54px;height:76px;z-index:2;text-align:center;user-select:none;touch-action:none;cursor:pointer}
+.pedigree-symbol{width:54px;height:54px;background:#fff;border:2px solid #252b35;position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.pedigree-symbol.square{border-radius:2px}
+.pedigree-symbol.circle{border-radius:50%}
+.pedigree-symbol img{width:100%;height:100%;object-fit:cover}
+.pedigree-person.selected .pedigree-symbol{border-color:#6657e8;box-shadow:0 0 0 4px #e9e6ff}
+.pedigree-label{font-size:10px;line-height:1.2;margin-top:5px;white-space:nowrap;max-width:110px;overflow:hidden;text-overflow:ellipsis;transform:translateX(-28px);width:110px;color:#303743}
+@media(max-width:700px){.pedigree-person{width:48px;height:68px}.pedigree-symbol{width:48px;height:48px}.pedigree-label{font-size:9px}}

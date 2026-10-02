@@ -198,20 +198,15 @@ function renderTree(){
   canvas.innerHTML="";
   if(!people.length)return;
 
-  // Luôn vẽ TOÀN BỘ gia phả. Việc chọn một người chỉ thay đổi người đang xem,
-  // không cắt sơ đồ thành một cây riêng.
+  // Một sơ đồ duy nhất, giữ nguyên khung người. Chỉ thay đổi các thanh nối:
+  // vợ/chồng = ngang; cha mẹ -> con = dọc; anh/chị/em = cùng một thanh ngang.
   const root=get("me")||people[0];
-  const generations={};
-  const gen=new Map();
-  const queue=[];
+  const gen=new Map(), queue=[];
   const put=(id,g)=>{
     if(!id||!get(id))return;
-    if(!gen.has(id)){
-      gen.set(id,g); queue.push(id);
-    }
+    if(!gen.has(id)){gen.set(id,g);queue.push(id);}
   };
   put(root.id,0);
-
   while(queue.length){
     const id=queue.shift(), g=gen.get(id), p=get(id);
     [p.father,p.mother].filter(Boolean).forEach(x=>put(x,g-1));
@@ -219,97 +214,177 @@ function renderTree(){
     if(p.spouse)put(p.spouse,g);
     siblingsOf(id).forEach(x=>put(x.id,g));
   }
-
-  // Nếu có người chưa nối với gốc, vẫn đưa họ vào cùng một sơ đồ.
   people.forEach(p=>{if(!gen.has(p.id))put(p.id,0)});
 
-  gen.forEach((g,id)=>{
-    if(!generations[g])generations[g]=[];
-    generations[g].push(id);
+  const rows={};
+  gen.forEach((g,id)=>(rows[g]??=[]).push(id));
+  const rowKeys=Object.keys(rows).map(Number).sort((a,b)=>a-b);
+  const minG=Math.min(...rowKeys), maxG=Math.max(...rowKeys);
+  const NODE_W=180, NODE_H=88, COUPLE_GAP=42, GROUP_GAP=72, ROW_H=175, PAD=70;
+  const positions={};
+
+  // Gom vợ/chồng thành một cụm, nhưng vẫn giữ nguyên card đẹp hiện tại.
+  rowKeys.forEach(g=>{
+    const ids=rows[g].slice();
+    const used=new Set(), groups=[];
+    ids.forEach(id=>{
+      if(used.has(id))return;
+      const p=get(id), sid=p?.spouse;
+      if(sid&&ids.includes(sid)&&!used.has(sid)){
+        groups.push([id,sid]); used.add(id); used.add(sid);
+      }else{
+        groups.push([id]); used.add(id);
+      }
+    });
+    groups.sort((a,b)=>{
+      const pa=get(a[0]), pb=get(b[0]);
+      return (pa?.birthOrder||99)-(pb?.birthOrder||99);
+    });
+    rows[g]=groups;
   });
 
-  const positions={};
-  const W=210,H=125;
-  const allRows=Object.keys(generations).map(Number);
-  const minG=Math.min(...allRows), maxG=Math.max(...allRows);
-  const canvasWidth=Math.max(1100, ...allRows.map(g=>generations[g].length*W+120));
+  const groupWidth=gr=>gr.length===2 ? NODE_W*2+COUPLE_GAP : NODE_W;
+  const maxRowWidth=Math.max(...rowKeys.map(g=>{
+    const gs=rows[g];
+    return gs.reduce((sum,gr)=>sum+groupWidth(gr),0)+Math.max(0,gs.length-1)*GROUP_GAP;
+  }));
+  const canvasWidth=Math.max(1100, maxRowWidth+PAD*2);
+  const canvasHeight=(maxG-minG+1)*ROW_H+150;
 
-  Object.keys(generations).sort((a,b)=>Number(a)-Number(b)).forEach(g=>{
-    const arr=generations[g];
-    // Giữ vợ/chồng gần nhau khi có thể.
-    arr.sort((a,b)=>{
-      const pa=get(a),pb=get(b);
-      if(pa.spouse===b)return -1;
-      if(pb.spouse===a)return 1;
-      return (pa.birthOrder||99)-(pb.birthOrder||99);
-    });
-    const total=arr.length*W;
-    const start=Math.max(40,(canvasWidth-total)/2);
-    arr.forEach((id,i)=>{
-      positions[id]={x:start+i*W,y:(Number(g)-minG)*H+50};
+  rowKeys.forEach(g=>{
+    const gs=rows[g];
+    const total=gs.reduce((sum,gr)=>sum+groupWidth(gr),0)+Math.max(0,gs.length-1)*GROUP_GAP;
+    let x=Math.max(PAD,(canvasWidth-total)/2);
+    const y=(g-minG)*ROW_H+45;
+    gs.forEach(gr=>{
+      if(gr.length===2){
+        positions[gr[0]]={x,y};
+        positions[gr[1]]={x:NODE_W+COUPLE_GAP+x,y};
+        x+=NODE_W*2+COUPLE_GAP+GROUP_GAP;
+      }else{
+        positions[gr[0]]={x,y};
+        x+=NODE_W+GROUP_GAP;
+      }
     });
   });
 
   canvas.style.width=canvasWidth+"px";
-  canvas.style.height=((maxG-minG+1)*H+120)+"px";
+  canvas.style.height=canvasHeight+"px";
 
-  const lines=[];
+  const svg=document.createElementNS("http://www.w3.org/2000/svg","svg");
+  svg.setAttribute("width",canvasWidth); svg.setAttribute("height",canvasHeight);
+  svg.setAttribute("class","family-connectors");
+  canvas.appendChild(svg);
+  const line=(x1,y1,x2,y2,cls="")=>{
+    const l=document.createElementNS("http://www.w3.org/2000/svg","line");
+    l.setAttribute("x1",x1); l.setAttribute("y1",y1);
+    l.setAttribute("x2",x2); l.setAttribute("y2",y2);
+    l.setAttribute("class",cls); svg.appendChild(l);
+  };
+
+  const center=p=>({x:p.x+NODE_W/2,y:p.y+NODE_H/2});
+  const top=p=>p.y;
+  const bottom=p=>p.y+NODE_H;
+  const coupleKey=(a,b)=>[a,b].sort().join("|");
+  const doneCouples=new Set();
+  const doneSiblingBars=new Set();
+
+  // 1) Vợ/chồng: đường ngang ở chính giữa hai card.
   people.forEach(p=>{
-    const child=positions[p.id];
-    if(!child)return;
-    [p.father,p.mother].filter(x=>x&&positions[x]).forEach(pid=>lines.push({a:positions[pid],b:child,type:"parent"}));
-    if(p.spouse && p.id < p.spouse && positions[p.spouse]){
-      lines.push({a:positions[p.id],b:positions[p.spouse],type:"spouse"});
+    if(!p.spouse||!positions[p.id]||!positions[p.spouse])return;
+    const key=coupleKey(p.id,p.spouse);
+    if(doneCouples.has(key))return;
+    doneCouples.add(key);
+    const a=positions[p.id], b=positions[p.spouse];
+    const left=a.x<b.x?a:b, right=a.x<b.x?b:a;
+    line(left.x+NODE_W, left.y+NODE_H/2, right.x, right.y+NODE_H/2, "connector-spouse");
+  });
+
+  // 2) Cha mẹ -> con: một đường dọc từ giữa cặp vợ/chồng xuống thanh anh/chị/em.
+  // 3) Anh/chị/em cùng thế hệ: nối bằng một thanh ngang rồi đi dọc xuống từng card.
+  const processedParentGroups=new Set();
+  people.forEach(parent=>{
+    const spouse=parent.spouse?get(parent.spouse):null;
+    const parentIds=spouse&&positions[spouse.id] ? [parent.id,spouse.id] : [parent.id];
+    const validParentIds=parentIds.filter(id=>positions[id]);
+    if(!validParentIds.length)return;
+    const kids=childrenOf(parent.id).filter(k=>positions[k.id]);
+    if(!kids.length)return;
+
+    const key=validParentIds.slice().sort().join("|");
+    if(processedParentGroups.has(key))return;
+    processedParentGroups.add(key);
+
+    const parentCenters=validParentIds.map(id=>center(positions[id]).x);
+    const junctionX=validParentIds.length===2
+      ? (Math.min(...parentCenters)+Math.max(...parentCenters))/2
+      : parentCenters[0];
+    const parentBottom=Math.max(...validParentIds.map(id=>bottom(positions[id])));
+    const childTop=Math.min(...kids.map(k=>top(positions[k.id])));
+    const siblingY=parentBottom+(childTop-parentBottom)/2;
+
+    line(junctionX,parentBottom,junctionX,siblingY,"connector-parent");
+
+    const childXs=[...new Set(kids.map(k=>center(positions[k.id]).x))].sort((a,b)=>a-b);
+    if(childXs.length>1){
+      const barKey=key+"=>"+childXs.join(",");
+      if(!doneSiblingBars.has(barKey)){
+        doneSiblingBars.add(barKey);
+        line(childXs[0],siblingY,childXs[childXs.length-1],siblingY,"connector-siblings");
+      }
     }
+    childXs.forEach(cx=>line(cx,siblingY,cx,childTop,"connector-parent"));
   });
 
-  lines.forEach(({a,b,type})=>{
-    const x1=a.x+90,y1=type==="spouse"?a.y+44:a.y+88;
-    const x2=b.x+90,y2=type==="spouse"?b.y+44:b.y;
-    const dx=x2-x1,dy=y2-y1,len=Math.hypot(dx,dy),ang=Math.atan2(dy,dx);
-    const el=document.createElement("div");
-    el.className="connector"+(type==="spouse"?" spouse-connector":"");
-    el.style.left=x1+"px";el.style.top=y1+"px";el.style.width=len+"px";
-    el.style.transform=`rotate(${ang}rad)`;
-    canvas.appendChild(el);
+  // Trường hợp chỉ biết một cha/mẹ và người đó không có spouse.
+  people.forEach(child=>{
+    if(!positions[child.id])return;
+    const parents=[child.father,child.mother].filter(id=>id&&get(id)&&positions[id]);
+    if(parents.length!==1)return;
+    const parent=get(parents[0]);
+    if(parent.spouse&&get(parent.spouse)&&positions[parent.spouse])return;
+    const px=center(positions[parent.id]).x;
+    const py=bottom(positions[parent.id]);
+    const cx=center(positions[child.id]).x;
+    const cy=top(positions[child.id]);
+    const mid=py+(cy-py)/2;
+    line(px,py,px,mid,"connector-parent");
+    line(px,mid,cx,mid,"connector-siblings");
+    line(cx,mid,cx,cy,"connector-parent");
   });
 
+  // Card người: giữ nguyên giao diện đẹp, avatar, tên và thao tác chọn/sửa.
   people.forEach(p=>{
-    const pos=positions[p.id];
-    if(!pos)return;
+    const pos=positions[p.id]; if(!pos)return;
     const id=p.id;
     const el=document.createElement("div");
     el.className="tree-card"+(id===selectedId?" selected":"");
-    el.style.left=pos.x+"px";el.style.top=pos.y+"px";
+    el.style.left=pos.x+"px"; el.style.top=pos.y+"px";
     el.innerHTML=`<div class="avatar">${avatar(p)}</div><div><strong>${esc(p.nickname||p.name)}</strong><small>${esc(p.name)}${p.birth?` • ${p.birth}`:""}</small></div>`;
 
-    let downX=0,downY=0,downTime=0;
+    let downX=0,downY=0;
     el.addEventListener("pointerdown",e=>{
-      downX=e.clientX;downY=e.clientY;downTime=Date.now();
-      drag.on=true;drag.moved=false;drag.cardId=id;drag.x=e.clientX;drag.y=e.clientY;
-      drag.sl=drag.l;drag.st=drag.t;
+      downX=e.clientX; downY=e.clientY;
+      drag.on=true; drag.moved=false; drag.cardId=id; drag.x=e.clientX; drag.y=e.clientY;
+      drag.sl=drag.l; drag.st=drag.t;
       el.setPointerCapture?.(e.pointerId);
     });
     el.addEventListener("pointermove",e=>{
       if(!drag.on||drag.cardId!==id)return;
-      const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
+      const dx=e.clientX-drag.x, dy=e.clientY-drag.y;
       if(Math.abs(e.clientX-downX)>5||Math.abs(e.clientY-downY)>5)drag.moved=true;
-      drag.l=drag.sl+dx;drag.t=drag.st+dy;
-      applyTreeTransform();
+      drag.l=drag.sl+dx; drag.t=drag.st+dy; applyTreeTransform();
     });
     el.addEventListener("pointerup",e=>{
       if(!drag.on||drag.cardId!==id)return;
-      const moved=drag.moved || Math.abs(e.clientX-downX)>5 || Math.abs(e.clientY-downY)>5;
-      drag.on=false;drag.cardId="";
+      const moved=drag.moved||Math.abs(e.clientX-downX)>5||Math.abs(e.clientY-downY)>5;
+      drag.on=false; drag.cardId="";
       if(moved)return;
-
       selectedId=id;
-      // Bấm người nào thì phóng to người đó, nhưng vẫn giữ nguyên TOÀN BỘ cây.
       const target=positions[id];
-      scale=Math.min(1.55,Math.max(1.08,scale+0.12));
       const vw=$("#treeViewport").clientWidth,vh=$("#treeViewport").clientHeight;
-      drag.l=vw/2-(target.x+90)*scale;
-      drag.t=vh/2-(target.y+44)*scale;
+      drag.l=vw/2-(target.x+NODE_W/2)*scale;
+      drag.t=vh/2-(target.y+NODE_H/2)*scale;
       renderAll(true);
     });
     el.ondblclick=e=>{e.stopPropagation();openModal(id)};
