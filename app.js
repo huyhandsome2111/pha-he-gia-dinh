@@ -126,7 +126,14 @@ function renderSelects(){
 function renderProfile(){
   const p=get(selectedId);if(!p){$("#profile").innerHTML='<div class="empty">Chưa chọn người.</div>';return}
   const parents=parentsOf(p.id),kids=childrenOf(p.id),siblings=siblingsOf(p.id);
+  const me=people.find(x=>normalizeText(x.nickname||"")==="toi" || normalizeText(x.name)==="toi") || get("me");
+  let callout="";
+  if(me && me.id!==p.id){
+    const r=relationship(me.id,p.id);
+    callout=`<div class="callout"><div class="callout-label">CÁCH XƯNG HÔ VỚI NGƯỜI NÀY</div><div class="callout-main">Tôi gọi <b>${esc(p.nickname||p.name)}</b> là <strong>${esc(r.title)}</strong></div><div class="muted">Quan hệ được suy ra từ cây gia đình.</div></div>`;
+  }
   $("#profile").innerHTML=`<div class="profile">
+    ${callout}
     <div class="profile-top"><div class="avatar">${avatar(p)}</div><div><h3>${esc(p.name)}</h3><div class="sub">${esc(p.nickname||"")} ${p.birth?`• ${p.birth}`:""}</div></div></div>
     <div class="info-grid">
       <div class="info"><b>GIỚI TÍNH</b><span>${p.gender==="female"?"Nữ":p.gender==="male"?"Nam":"Khác"}</span></div>
@@ -173,15 +180,30 @@ function renderTree(){
   ids.forEach(id=>{
     const p=get(id),pos=positions[id],el=document.createElement("div");el.className="tree-card"+(id===selectedId?" selected":"");el.style.left=pos.x+"px";el.style.top=pos.y+"px";
     el.innerHTML=`<div class="avatar">${avatar(p)}</div><div><strong>${esc(p.nickname||p.name)}</strong><small>${esc(p.name)}${p.birth?` • ${p.birth}`:""}</small></div>`;
-    el.onclick=()=>{
+    // Có thể kéo sơ đồ bắt đầu ngay trên thẻ. Nếu chỉ bấm nhẹ thì mới chọn/phóng to.
+    el.addEventListener("pointerdown",e=>{
+      drag.on=true;drag.moved=false;drag.cardId=id;drag.x=e.clientX;drag.y=e.clientY;drag.sl=drag.l;drag.st=drag.t;
+      el.setPointerCapture?.(e.pointerId);
+    });
+    el.addEventListener("pointermove",e=>{
+      if(!drag.on)return;
+      const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
+      if(Math.abs(dx)>5||Math.abs(dy)>5)drag.moved=true;
+      drag.l=drag.sl+dx;drag.t=drag.st+dy;
+      renderTree();
+    });
+    el.addEventListener("pointerup",e=>{
+      if(!drag.on)return;
+      const moved=drag.moved;drag.on=false;drag.cardId="";
+      if(moved){e.preventDefault();return;}
       selectedId=id;
       const target=positions[id];
       scale=Math.min(1.7,Math.max(1.18,scale+.18));
       const vw=$("#treeViewport").clientWidth, vh=$("#treeViewport").clientHeight;
       drag.l=vw/2-(target.x+90)*scale;
       drag.t=vh/2-(target.y+44)*scale;
-      renderTree();
-    };
+      renderAll();
+    });
     el.ondblclick=e=>{e.stopPropagation();openModal(id)};
     canvas.appendChild(el);
   });
@@ -327,8 +349,18 @@ $("#buildFamilyBtn").onclick=()=>{const text=$("#familyText").value.trim();if(!t
 $("#resetBtn").onclick=()=>{if(confirm("Khôi phục dữ liệu mẫu?")){people=JSON.parse(JSON.stringify(sample));save();selectedId="me";renderAll()}};
 $("#zoomIn").onclick=()=>{scale=Math.min(1.7,scale+.1);renderTree()};$("#zoomOut").onclick=()=>{scale=Math.max(.55,scale-.1);renderTree()};$("#zoomReset").onclick=()=>{scale=1;drag={...drag,l:0,t:0};renderTree()};
 $("#treeViewport").addEventListener("wheel",e=>{e.preventDefault();scale=Math.max(.55,Math.min(1.7,scale+(e.deltaY<0?.08:-.08)));renderTree()},{passive:false});
-$("#treeViewport").addEventListener("pointerdown",e=>{if(e.target.closest(".tree-card"))return;drag.on=true;drag.x=e.clientX;drag.y=e.clientY;drag.sl=drag.l;drag.st=drag.t;$("#treeViewport").setPointerCapture(e.pointerId)});
-$("#treeViewport").addEventListener("pointermove",e=>{if(!drag.on)return;drag.l=drag.sl+(e.clientX-drag.x);drag.t=drag.st+(e.clientY-drag.y);renderTree()});
-$("#treeViewport").addEventListener("pointerup",()=>drag.on=false);
+$("#treeViewport").addEventListener("pointerdown",e=>{
+  if(e.target.closest(".tree-card"))return;
+  drag.on=true;drag.moved=false;drag.cardId="";drag.x=e.clientX;drag.y=e.clientY;drag.sl=drag.l;drag.st=drag.t;
+  $("#treeViewport").setPointerCapture?.(e.pointerId);
+});
+$("#treeViewport").addEventListener("pointermove",e=>{
+  if(!drag.on)return;
+  const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
+  if(Math.abs(dx)>3||Math.abs(dy)>3)drag.moved=true;
+  drag.l=drag.sl+dx;drag.t=drag.st+dy;renderTree();
+});
+$("#treeViewport").addEventListener("pointerup",()=>{drag.on=false;drag.cardId=""});
+$("#treeViewport").addEventListener("pointercancel",()=>{drag.on=false;drag.cardId=""});
 document.addEventListener("click",e=>{const row=e.target.closest("[data-person]");if(row){selectedId=row.dataset.person;renderAll()}});
 renderAll();
