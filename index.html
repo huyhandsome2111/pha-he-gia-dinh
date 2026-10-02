@@ -130,12 +130,16 @@
       </div>
       <button id="closeKeyboardModal" class="icon-btn">×</button>
     </div>
-    <p class="muted">Viết tự nhiên theo từng dòng. Hệ thống sẽ đọc các từ như <b>cha, mẹ, con, vợ, chồng, anh, chị, em</b> rồi tự tạo người và nối sơ đồ.</p>
-    <textarea id="familyText" rows="10" placeholder="Ví dụ:
-Tôi là con của Nguyễn Văn A và Trần Thị B
-Nguyễn Văn A là chồng của Trần Thị B
-Nguyễn Văn A là con của Nguyễn Văn C và Lê Thị D
-Nguyễn Văn C là chồng của Lê Thị D"></textarea>
+    <p class="muted">Cách nhanh nhất: <b>A + B &gt; C, D</b> nghĩa là A và B là cha/mẹ của C và D. Dòng <b>A + B</b> nghĩa là vợ/chồng. Vẫn hỗ trợ câu tự nhiên như trước.</p>
+    <textarea id="familyText" rows="10" placeholder="Ví dụ nhanh:
+Cụ ông + Cụ bà > Ông nội
+Ông nội + Bà nội > Ba, Chú
+Ba + Mẹ > Tôi, Anh
+Chú + Thím > Anh họ, Chị họ
+
+Hoặc viết câu tự nhiên:
+Ba là chồng của Mẹ
+Tôi là con của Ba và Mẹ"></textarea>
     <div id="parsePreview" class="quick-add-context" style="margin-top:12px"></div>
     <div class="form-actions">
       <button type="button" id="cancelKeyboard" class="ghost">Hủy</button>
@@ -155,7 +159,9 @@ Nguyễn Văn C là chồng của Lê Thị D"></textarea>
       <button id="closeRelationModal" class="icon-btn">×</button>
     </div>
     <div class="quick-add-context" id="quickAddContext"></div>
-    <label>Người này là...</label>
+    <label>Tên người mới</label>
+    <input id="quickName" placeholder="Nguyễn Văn A">
+    <label>Người này sẽ là...</label>
     <select id="quickRelation">
       <option value="child">Con</option>
       <option value="father">Ba / Cha</option>
@@ -169,7 +175,7 @@ Nguyễn Văn C là chồng của Lê Thị D"></textarea>
     </div>
     <div class="form-actions">
       <button type="button" id="cancelRelation" class="ghost">Hủy</button>
-      <button type="button" id="createRelated" class="primary">Tiếp tục nhập người</button>
+      <button type="button" id="createRelated" class="primary">Tiếp tục nhập thông tin</button>
     </div>
   </div>
 </div>

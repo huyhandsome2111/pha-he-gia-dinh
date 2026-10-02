@@ -369,40 +369,59 @@ function openRelationModal(id){
   quickParentId=id;
   const p=get(id);
   if(!p)return;
-  $("#quickAddContext").innerHTML=`<strong>Đang thêm người cho: ${esc(p.nickname||p.name)}</strong><span class="muted">Sau khi chọn quan hệ, app sẽ tự nối người mới vào đúng vị trí.</span>`;
+  $("#quickAddContext").innerHTML=`<strong>Đang thêm người cho: ${esc(p.nickname||p.name)}</strong><span class="muted">Tên người mới sẽ được đặt vào quan hệ bạn chọn và tự nối vào sơ đồ.</span>`;
+  $("#quickName").value="";
   $("#quickRelation").value="child";
   $("#quickBirthOrder").value="";
   $("#siblingOrderWrap").classList.add("hidden");
   $("#relationModal").classList.remove("hidden");
+  setTimeout(()=>$("#quickName").focus(),0);
 }
 function closeRelationModal(){$("#relationModal").classList.add("hidden");quickParentId=""}
 function prepareRelatedPerson(){
   const base=get(quickParentId); if(!base)return;
   const rel=$("#quickRelation").value;
+  const enteredName=$("#quickName").value.trim();
   const id=crypto.randomUUID();
-  const p={id,name:"",nickname:"",gender:rel==="mother"?"female":rel==="father"?"male":rel==="spouse"?(base.gender==="male"?"female":"male"):"male",birth:"",job:"",hometown:"",father:"",mother:"",spouse:"",birthOrder:Number($("#quickBirthOrder").value)||"",notes:"",photo:""};
-  // Đóng hộp chọn quan hệ rồi mở form người mới với quan hệ đã được gắn sẵn.
-  people.push(p);
+  const inferredGender=rel==="mother"?"female":rel==="father"?"male":rel==="spouse"?(base.gender==="male"?"female":base.gender==="female"?"male":"other"):"other";
+  let p=findPersonByName(enteredName);
+  const isNew=!p;
+  if(!p){
+    p={id,name:enteredName,nickname:"",gender:inferredGender,birth:"",job:"",hometown:"",father:"",mother:"",spouse:"",birthOrder:Number($("#quickBirthOrder").value)||"",notes:"",photo:""};
+    people.push(p);
+  }
   const baseId=base.id;
   if(rel==="child"){
-    if(base.gender==="female") p.mother=baseId; else p.father=baseId;
+    const spouse=get(base.spouse);
+    if(base.gender==="female") p.mother=baseId;
+    else if(base.gender==="male") p.father=baseId;
+    if(spouse){
+      if(spouse.gender==="female") p.mother=spouse.id;
+      else if(spouse.gender==="male") p.father=spouse.id;
+    }
+    if(!p.birthOrder)p.birthOrder=childrenOf(baseId).filter(x=>x.id!==p.id).length+1;
   }else if(rel==="father"){
-    const old=base.father; p.father=old?old:""; base.father=id;
+    base.father=p.id;
+    if(base.mother){p.spouse=base.mother;const m=get(base.mother);if(m)m.spouse=p.id;}
+    if(!p.birthOrder)p.birthOrder=1;
   }else if(rel==="mother"){
-    const old=base.mother; p.mother=old?old:""; base.mother=id;
+    base.mother=p.id;
+    if(base.father){p.spouse=base.father;const f=get(base.father);if(f)f.spouse=p.id;}
+    if(!p.birthOrder)p.birthOrder=1;
   }else if(rel==="spouse"){
-    p.spouse=baseId; base.spouse=id;
+    p.spouse=baseId; base.spouse=p.id;
   }else if(rel==="sibling"){
     p.father=base.father||""; p.mother=base.mother||"";
-    if(!p.birthOrder)p.birthOrder=(base.birthOrder||1)+1;
+    if(!p.birthOrder)p.birthOrder=(base.birthOrder||siblingsOf(base.id).length+1)+1;
   }
-  // Nếu tạo cha/mẹ, giữ vợ/chồng của cha/mẹ quando có thể để sơ đồ đầy đủ hơn.
-  if(rel==="father" && base.mother){p.spouse=base.mother;const m=get(base.mother);if(m)m.spouse=id}
-  if(rel==="mother" && base.father){p.spouse=base.father;const f=get(base.father);if(f)f.spouse=id}
   save();
   closeRelationModal();
-  selectedId=id;
-  openModal(id);
+  selectedId=p.id;
+  if(isNew && !enteredName){
+    openModal(p.id);
+  }else{
+    renderAll(true);
+  }
 }
 function openModal(id=""){
   $("#modal").classList.remove("hidden");$("#personId").value=id;$("#modalTitle").textContent=id?"Chỉnh sửa người":"Thêm người";$("#deletePersonBtn").classList.toggle("hidden",!id);
@@ -414,7 +433,7 @@ function openModal(id=""){
   $("#avatarPreview").innerHTML=avatar(p);
 }
 function closeModal(){$("#modal").classList.add("hidden")}
-$("#addPersonBtn").onclick=()=>openModal();$("#closeModal").onclick=closeModal;$("#cancelBtn").onclick=closeModal;
+$("#addPersonBtn").onclick=()=>{if(selectedId&&get(selectedId))openRelationModal(selectedId);else openModal()};$("#closeModal").onclick=closeModal;$("#cancelBtn").onclick=closeModal;
 $("#personForm").onsubmit=e=>{e.preventDefault();const id=$("#personId").value||crypto.randomUUID();let old=get(id);const p={id,name:$("#name").value.trim(),nickname:$("#nickname").value.trim(),gender:$("#gender").value,birth:Number($("#birth").value)||"",job:$("#job").value.trim(),hometown:$("#hometown").value.trim(),father:$("#father").value,mother:$("#mother").value,spouse:$("#spouse").value,birthOrder:Number($("#birthOrder").value)||"",notes:$("#notes").value.trim(),photo:modalPhoto||old?.photo||""};if(!p.name)return;if(old)Object.assign(old,p);else people.push(p);if(p.spouse){const s=get(p.spouse);if(s)s.spouse=p.id}save();selectedId=id;closeModal();renderAll()};
 $("#deletePersonBtn").onclick=()=>{const id=$("#personId").value;if(!id)return;if(!confirm("Xóa người này?"))return;people=people.filter(p=>p.id!==id);people.forEach(p=>{if(p.father===id)p.father="";if(p.mother===id)p.mother="";if(p.spouse===id)p.spouse=""});selectedId=people[0]?.id||"";save();closeModal();renderAll()};
 $("#photo").onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{$("#avatarPreview").innerHTML=`<img src="${r.result}">`;const id=$("#personId").value;if(id){get(id).photo=r.result;save()}};r.readAsDataURL(f)};
@@ -433,7 +452,10 @@ function makePerson(name,gender="other"){
   name=name.trim().replace(/^[,.;:]+|[,.;:]+$/g,"");
   if(!name)return null;
   let p=findPersonByName(name);
-  if(p){if(p.gender==="other"&&gender!=="other")p.gender=gender;return p}
+  if(p){
+    if(p.gender==="other"&&gender!=="other")p.gender=gender;
+    return p;
+  }
   p={id:crypto.randomUUID(),name,nickname:"",gender,birth:"",job:"",hometown:"",father:"",mother:"",spouse:"",birthOrder:"",notes:"",photo:""};
   people.push(p); return p;
 }
@@ -441,27 +463,103 @@ function splitPeople(text){
   return text.replace(/\s+(?:và|&|,|;|\+|\band\b)\s+/gi,"|").split("|").map(x=>x.trim()).filter(Boolean);
 }
 function detectGender(role){
+  const raw=String(role||"").toLowerCase();
   const r=normalizeText(role);
-  if(/\b(ba|bo|cha|ong|chu|cau|anh|em trai|con trai|chong|bo chong)\b/.test(r))return "male";
-  if(/\b(me|ma|ba|ba noi|ba ngoai|co|di|chi|em gai|con gai|vo|me chong)\b/.test(r))return "female";
+  if(/\b(cu\s+ba|ba\s+noi|ba\s+ngoai|mẹ|me|ma|co|cô|dì|di|chi|chị|em gai|con gai|vo|vợ|me chong|mẹ chồng|bà)\b/.test(raw))return "female";
+  if(/\b(cu\s+ong|ong|ông|ba|bo|bố|cha|chu|chú|cau|cậu|anh|em trai|con trai|chong|chồng|bo chong|bố chồng)\b/.test(raw) || /\b(ong|ba|bo|cha|chu|cau|anh|em trai|con trai|chong|bo chong)\b/.test(r))return "male";
   return "other";
 }
+function setSpouses(a,b){
+  if(!a||!b)return;
+  a.spouse=b.id; b.spouse=a.id;
+  if(a.gender==="other"&&b.gender!=="other")a.gender=b.gender==="male"?"female":"male";
+  if(b.gender==="other"&&a.gender!=="other")b.gender=a.gender==="male"?"female":"male";
+}
 function connectParent(child,parent,gender){
-  if(gender==="female") child.mother=parent.id; else if(gender==="male") child.father=parent.id;
+  if(!child||!parent)return;
+  if(gender==="female") child.mother=parent.id;
+  else if(gender==="male") child.father=parent.id;
+}
+function connectParents(child,parents){
+  parents=parents.filter(Boolean).slice(0,2);
+  if(!parents.length)return;
+  const female=parents.find(p=>p.gender==="female");
+  const male=parents.find(p=>p.gender==="male");
+  if(male) child.father=male.id;
+  if(female) child.mother=female.id;
+  if(parents.length===1){
+    if(parents[0].gender==="female") child.mother=parents[0].id;
+    else if(parents[0].gender==="male") child.father=parents[0].id;
+    else if(!child.father) child.father=parents[0].id;
+  }
+  if(parents.length===2 && !male && !female){
+    child.father=parents[0].id; child.mother=parents[1].id;
+  }else if(parents.length===2 && !male){
+    const other=parents.find(p=>p!==female); if(other)child.father=other.id;
+  }else if(parents.length===2 && !female){
+    const other=parents.find(p=>p!==male); if(other)child.mother=other.id;
+  }
+}
+function parseCompactLine(line){
+  if(!line.includes(">") && !line.includes("+") && !/^[^\n]+\s*\+\s*[^\n]+$/.test(line)) return {matched:false};
+  const clean=line.replace(/→|=>/g,">").trim();
+  if(clean.includes(">")){
+    const parts=clean.split(">");
+    if(parts.length!==2)return {matched:false};
+    const left=parts[0].trim(), right=parts[1].trim();
+    const parentNames=left.split("+").map(x=>x.trim()).filter(Boolean);
+    if(!parentNames.length)return {matched:false};
+    const childNames=right.split(/\s*[,;]\s*/).map(x=>x.trim()).filter(Boolean);
+    if(!childNames.length)return {matched:false};
+    let parents=parentNames.map((name,i)=>makePerson(name,detectGender(name)));
+    if(parents.length===2 && parents[0]?.gender==="other" && parents[1]?.gender!=="other")parents[0].gender=parents[1].gender==="male"?"female":"male";
+    if(parents.length===2 && parents[1]?.gender==="other" && parents[0]?.gender!=="other")parents[1].gender=parents[0].gender==="male"?"female":"male";
+    if(parents.length===2)setSpouses(parents[0],parents[1]);
+    childNames.forEach((name,index)=>{
+      const child=makePerson(name,detectGender(name));
+      connectParents(child,parents);
+      if(child && !child.birthOrder)child.birthOrder=index+1;
+    });
+    return {matched:true};
+  }
+  if(clean.includes("+")){
+    const pair=clean.split("+").map(x=>x.trim()).filter(Boolean);
+    if(pair.length===2){
+      const a=makePerson(pair[0],detectGender(pair[0]));
+      const b=makePerson(pair[1],detectGender(pair[1]));
+      setSpouses(a,b);
+      return {matched:true};
+    }
+  }
+  return {matched:false};
 }
 function parseFamilyText(text){
   const statements=text.split(/[\n.!?]+/).map(s=>s.trim()).filter(Boolean);
-  let created=0, links=0;
+  let links=0;
   const unresolved=[];
+  const beforeCount=people.length;
   for(const raw of statements){
     let line=raw.replace(/^[-*•]\s*/,"").trim();
+    const compact=parseCompactLine(line);
+    if(compact.matched){
+      const beforeLinks=links;
+      if(line.includes(">")){
+        const pair=line.replace(/→|=>/g,">").split(">");
+        const parents=pair[0].split("+").map(x=>findPersonByName(x.trim())).filter(Boolean);
+        if(parents.length===2 && parents[0].spouse===parents[1].id)links+=1;
+        const childNames=pair[1].split(/\s*[,;]\s*/).map(x=>x.trim()).filter(Boolean);
+        links+=childNames.length*parents.length;
+      }else links+=1;
+      continue;
+    }
     let m;
     // "A là con của B và C"
     m=line.match(/^(.+?)\s+(?:la|là)\s+(?:con|con trai|con gai)\s+(?:cua|của)\s+(.+)$/i);
     if(m){
       const child=makePerson(m[1],/con gai/i.test(m[0])?"female":/con trai/i.test(m[0])?"male":"other");
       const parts=splitPeople(m[2]);
-      parts.forEach((name,i)=>{const par=makePerson(name,i===0?"male":"female"); if(par){connectParent(child,par,par.gender);links++}});
+      const pars=parts.map((name,i)=>makePerson(name,i===0?"male":"female"));
+      connectParents(child,pars); links+=pars.length;
       continue;
     }
     // "Ba/Mẹ của A là B"
@@ -476,14 +574,14 @@ function parseFamilyText(text){
     if(m){const gender=/me|mẹ/i.test(m[2])?"female":"male";const par=makePerson(m[1],gender),child=makePerson(m[3]);connectParent(child,par,gender);links++;continue;}
     // spouses
     m=line.match(/^(.+?)\s+(?:la|là)\s+(vo|vợ|chong|chồng)\s+(?:cua|của)\s+(.+)$/i);
-    if(m){const female=/vo|vợ/i.test(m[2]);const a=makePerson(m[1],female?"female":"male"),b=makePerson(m[3],female?"male":"female");a.spouse=b.id;b.spouse=a.id;links++;continue;}
+    if(m){const female=/vo|vợ/i.test(m[2]);const a=makePerson(m[1],female?"female":"male"),b=makePerson(m[3],female?"male":"female");setSpouses(a,b);links++;continue;}
     // siblings
     m=line.match(/^(.+?)\s+(?:la|là)\s+(anh|chi|chị|em)\s+(?:cua|của)\s+(.+)$/i);
     if(m){const a=makePerson(m[1],/chi|chị/i.test(m[2])?"female":/anh/i.test(m[2])?"male":"other"),b=makePerson(m[3]);if(!a.father&&!a.mother){a.father=b.father||"";a.mother=b.mother||""}else{if(!b.father)b.father=a.father;if(!b.mother)b.mother=a.mother}links++;continue;}
     unresolved.push(line);
   }
   save();
-  return {created,links,unresolved};
+  return {created:people.length-beforeCount,links,unresolved};
 }
 function updateParsePreview(){
   const text=$("#familyText").value.trim();
