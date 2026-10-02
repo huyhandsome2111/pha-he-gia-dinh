@@ -310,15 +310,16 @@ function renderTree(){
     line(left.x+NODE_W, left.y+NODE_H/2, right.x, right.y+NODE_H/2, "connector-spouse");
   });
 
-  // 2 + 3) Nối cha mẹ -> thanh anh/chị/em -> từng người con bằng MỘT path liên tục.
-  // Theo đúng kiểu pedigree: từ giữa đường vợ/chồng đi xuống, qua thanh ngang anh/chị/em,
-  // rồi đi thẳng xuống giữa từng khung con. Không có đoạn rời hay khoảng hở tại các nút nối.
+  // 2 + 3) Nối cha mẹ -> thanh anh/chị/em -> từng người con.
+  // Các đoạn đều bắt đầu/kết thúc ĐÚNG tại mép khung hoặc tại điểm giao,
+  // nên nhìn thành một hệ thống đường liền mạch, không có khoảng hở.
   const processedParentGroups=new Set();
   people.forEach(parent=>{
     const spouse=parent.spouse?get(parent.spouse):null;
     const parentIds=spouse&&positions[spouse.id] ? [parent.id,spouse.id] : [parent.id];
     const validParentIds=parentIds.filter(id=>positions[id]);
     if(!validParentIds.length)return;
+
     const kids=childrenOf(parent.id).filter(k=>positions[k.id]);
     if(!kids.length)return;
 
@@ -326,24 +327,35 @@ function renderTree(){
     if(processedParentGroups.has(key))return;
     processedParentGroups.add(key);
 
-    const parentCenters=validParentIds.map(id=>center(positions[id]));
-    const junctionX=validParentIds.length===2
-      ? (parentCenters[0].x+parentCenters[1].x)/2
-      : parentCenters[0].x;
-    const marriageY=parentCenters.reduce((sum,c)=>sum+c.y,0)/parentCenters.length;
+    // Tâm ngang của cặp vợ/chồng (hoặc cha/mẹ đơn thân).
+    const parentXs=validParentIds.map(id=>center(positions[id]).x).sort((a,b)=>a-b);
+    const junctionX=parentXs.length===2 ? (parentXs[0]+parentXs[1])/2 : parentXs[0];
+    const parentBottom=Math.max(...validParentIds.map(id=>bottom(positions[id])));
     const childTop=Math.min(...kids.map(k=>top(positions[k.id])));
-    // Khoảng đặt thanh anh/chị/em nằm giữa thế hệ cha mẹ và con, cách đều hai phía.
-    const siblingY=marriageY+(childTop-marriageY)/2;
+
+    // Thanh anh/chị/em nằm chính giữa khoảng trống giữa hai thế hệ.
+    const siblingY=Math.round(parentBottom+(childTop-parentBottom)/2);
     const childXs=[...new Set(kids.map(k=>center(positions[k.id]).x))].sort((a,b)=>a-b);
 
-    // Một path duy nhất: điểm hôn nhân -> thanh anh/chị/em.
-    let d=`M ${junctionX} ${marriageY} L ${junctionX} ${siblingY}`;
-    if(childXs.length>1) d+=` M ${childXs[0]} ${siblingY} L ${childXs[childXs.length-1]} ${siblingY}`;
-    else d+=` M ${junctionX} ${siblingY} L ${junctionX} ${siblingY}`;
+    // Đường dọc từ giữa cặp vợ/chồng xuống thanh anh/chị/em.
+    // Bắt đầu tại MÉP DƯỚI khung để không bị cảm giác đứt đoạn.
+    line(junctionX,parentBottom,junctionX,siblingY,"connector-family");
 
-    // Các nhánh con được nối liền vào đúng thanh ngang và chạm sát mép trên card.
-    childXs.forEach(cx=>{ d+=` M ${cx} ${siblingY} L ${cx} ${childTop}`; });
-    path(d,"connector-family");
+    // Thanh ngang chung cho toàn bộ anh/chị/em.
+    const barLeft=childXs[0], barRight=childXs[childXs.length-1];
+    if(barLeft===barRight){
+      // Một người con: thanh ngang không cần kéo dài, chỉ cần điểm nối.
+      line(junctionX,siblingY,barLeft,siblingY,"connector-family");
+    }else{
+      line(barLeft,siblingY,barRight,siblingY,"connector-family");
+      // Nối điểm dọc của cha mẹ vào thanh ngang nếu nó không nằm đúng đầu thanh.
+      if(junctionX<barLeft || junctionX>barRight){
+        line(junctionX,siblingY,barLeft===junctionX?barRight:barLeft,siblingY,"connector-family");
+      }
+    }
+
+    // Mỗi con có một đường dọc liền từ thanh ngang tới MÉP TRÊN khung.
+    childXs.forEach(cx=>line(cx,siblingY,cx,childTop,"connector-family"));
   });
 
   // Trường hợp chỉ biết một cha/mẹ và người đó không có spouse.
@@ -354,10 +366,12 @@ function renderTree(){
     const parent=get(parents[0]);
     if(parent.spouse&&get(parent.spouse)&&positions[parent.spouse])return;
     const pp=positions[parent.id], cp=positions[child.id];
-    const px=center(pp).x, py=center(pp).y;
+    const px=center(pp).x, py=bottom(pp);
     const cx=center(cp).x, cy=top(cp);
-    const mid=py+(cy-py)/2;
-    path(`M ${px} ${py} L ${px} ${mid} L ${cx} ${mid} L ${cx} ${cy}`,"connector-family");
+    const mid=Math.round(py+(cy-py)/2);
+    line(px,py,px,mid,"connector-family");
+    line(Math.min(px,cx),mid,Math.max(px,cx),mid,"connector-family");
+    line(cx,mid,cx,cy,"connector-family");
   });
 
   // Card người: giữ nguyên giao diện đẹp, avatar, tên và thao tác chọn/sửa.
