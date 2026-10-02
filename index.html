@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Phả Hệ Gia Đình</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div>
+      <div class="eyebrow">FAMILY TREE</div>
+      <h1>Phả hệ gia đình</h1>
+      <p>Quản lý người thân, quan hệ và cách xưng hô.</p>
+    </div>
+    <div class="top-actions">
+      <button id="addPersonBtn" class="primary">＋ Thêm người</button>
+      <button id="resetBtn" class="ghost">↺ Dữ liệu mẫu</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="tree-panel panel">
+      <div class="panel-head">
+        <div>
+          <h2>Sơ đồ phả hệ</h2>
+          <span id="treeHint">Kéo để di chuyển • cuộn để phóng to</span>
+        </div>
+        <div class="tree-tools">
+          <button id="zoomOut">−</button>
+          <button id="zoomReset">100%</button>
+          <button id="zoomIn">＋</button>
+        </div>
+      </div>
+      <div id="treeViewport" class="tree-viewport">
+        <div id="treeCanvas" class="tree-canvas"></div>
+      </div>
+    </section>
+
+    <aside class="side">
+      <section class="panel profile-panel">
+        <div class="panel-head"><h2>Chi tiết người</h2></div>
+        <div id="profile"></div>
+      </section>
+
+      <section class="panel relation-panel">
+        <div class="panel-head">
+          <div>
+            <h2>🔎 Xưng hô</h2>
+            <span>Chọn hai người để hệ thống suy ra quan hệ.</span>
+          </div>
+        </div>
+        <label>Nhân vật chính</label>
+        <select id="mainPerson"></select>
+        <label>Đối tượng</label>
+        <select id="targetPerson"></select>
+        <button id="calculateBtn" class="primary full">Tính cách xưng hô</button>
+        <div id="relationResult"></div>
+      </section>
+    </aside>
+  </main>
+</div>
+
+<div id="modal" class="modal hidden">
+  <div class="modal-card">
+    <div class="modal-head">
+      <div>
+        <div class="eyebrow">PERSON</div>
+        <h2 id="modalTitle">Thêm người</h2>
+      </div>
+      <button id="closeModal" class="icon-btn">×</button>
+    </div>
+    <form id="personForm">
+      <input type="hidden" id="personId">
+      <div class="form-grid">
+        <div class="avatar-upload">
+          <div id="avatarPreview" class="avatar big">👤</div>
+          <label class="upload-btn">Chọn ảnh
+            <input id="photo" type="file" accept="image/*">
+          </label>
+        </div>
+        <div>
+          <label>Họ và tên *</label>
+          <input id="name" required placeholder="Nguyễn Văn A">
+          <label>Tên thường gọi</label>
+          <input id="nickname" placeholder="Ba, Ông Hai...">
+          <div class="two">
+            <div><label>Giới tính</label><select id="gender"><option value="male">Nam</option><option value="female">Nữ</option><option value="other">Khác</option></select></div>
+            <div><label>Năm sinh</label><input id="birth" type="number" min="1800" max="2100" placeholder="1955"></div>
+          </div>
+          <label>Nghề nghiệp</label><input id="job" placeholder="Giáo viên...">
+          <label>Quê quán</label><input id="hometown" placeholder="Gia Lai...">
+        </div>
+      </div>
+
+      <hr>
+      <h3>Quan hệ trực tiếp</h3>
+      <p class="muted">Chỉ cần khai báo quan hệ cơ bản. Hệ thống sẽ suy ra ông, bà, bác, chú, cô, cậu, dì, anh/chị/em họ...</p>
+      <div class="two">
+        <div><label>Cha</label><select id="father"><option value="">— Không có —</option></select></div>
+        <div><label>Mẹ</label><select id="mother"><option value="">— Không có —</option></select></div>
+      </div>
+      <div class="two">
+        <div><label>Vợ / chồng</label><select id="spouse"><option value="">— Không có —</option></select></div>
+        <div><label>Thứ tự sinh trong anh chị em</label><input id="birthOrder" type="number" min="1" placeholder="1"></div>
+      </div>
+
+      <label>Ghi chú</label>
+      <textarea id="notes" rows="3" placeholder="Thông tin thêm..."></textarea>
+
+      <div class="form-actions">
+        <button type="button" id="deletePersonBtn" class="danger hidden">Xóa người</button>
+        <div class="grow"></div>
+        <button type="button" id="cancelBtn" class="ghost">Hủy</button>
+        <button class="primary" type="submit">Lưu người</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
