@@ -173,7 +173,17 @@ function renderTree(){
   ids.forEach(id=>{
     const p=get(id),pos=positions[id],el=document.createElement("div");el.className="tree-card"+(id===selectedId?" selected":"");el.style.left=pos.x+"px";el.style.top=pos.y+"px";
     el.innerHTML=`<div class="avatar">${avatar(p)}</div><div><strong>${esc(p.nickname||p.name)}</strong><small>${esc(p.name)}${p.birth?` • ${p.birth}`:""}</small></div>`;
-    el.onclick=()=>{selectedId=id;renderAll()};el.ondblclick=()=>openModal(id);canvas.appendChild(el);
+    el.onclick=()=>{
+      selectedId=id;
+      const target=positions[id];
+      scale=Math.min(1.7,Math.max(1.18,scale+.18));
+      const vw=$("#treeViewport").clientWidth, vh=$("#treeViewport").clientHeight;
+      drag.l=vw/2-(target.x+90)*scale;
+      drag.t=vh/2-(target.y+44)*scale;
+      renderTree();
+    };
+    el.ondblclick=e=>{e.stopPropagation();openModal(id)};
+    canvas.appendChild(el);
   });
   canvas.style.transform=`translate(${drag.l}px,${drag.t}px) scale(${scale})`;
 }
@@ -241,6 +251,79 @@ $("#closeRelationModal").onclick=closeRelationModal;
 $("#cancelRelation").onclick=closeRelationModal;
 $("#quickRelation").onchange=e=>$("#siblingOrderWrap").classList.toggle("hidden",e.target.value!=="sibling");
 $("#createRelated").onclick=prepareRelatedPerson;
+function normalizeText(s){return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").trim()}
+function findPersonByName(name){
+  const n=normalizeText(name);
+  return people.find(p=>normalizeText(p.name)===n||normalizeText(p.nickname||"")===n);
+}
+function makePerson(name,gender="other"){
+  name=name.trim().replace(/^[,.;:]+|[,.;:]+$/g,"");
+  if(!name)return null;
+  let p=findPersonByName(name);
+  if(p){if(p.gender==="other"&&gender!=="other")p.gender=gender;return p}
+  p={id:crypto.randomUUID(),name,nickname:"",gender,birth:"",job:"",hometown:"",father:"",mother:"",spouse:"",birthOrder:"",notes:"",photo:""};
+  people.push(p); return p;
+}
+function splitPeople(text){
+  return text.replace(/\s+(?:và|&|,|;|\+|\band\b)\s+/gi,"|").split("|").map(x=>x.trim()).filter(Boolean);
+}
+function detectGender(role){
+  const r=normalizeText(role);
+  if(/\b(ba|bo|cha|ong|chu|cau|anh|em trai|con trai|chong|bo chong)\b/.test(r))return "male";
+  if(/\b(me|ma|ba|ba noi|ba ngoai|co|di|chi|em gai|con gai|vo|me chong)\b/.test(r))return "female";
+  return "other";
+}
+function connectParent(child,parent,gender){
+  if(gender==="female") child.mother=parent.id; else if(gender==="male") child.father=parent.id;
+}
+function parseFamilyText(text){
+  const statements=text.split(/[\n.!?]+/).map(s=>s.trim()).filter(Boolean);
+  let created=0, links=0;
+  const unresolved=[];
+  for(const raw of statements){
+    let line=raw.replace(/^[-*•]\s*/,"").trim();
+    let m;
+    // "A là con của B và C"
+    m=line.match(/^(.+?)\s+(?:la|là)\s+(?:con|con trai|con gai)\s+(?:cua|của)\s+(.+)$/i);
+    if(m){
+      const child=makePerson(m[1],/con gai/i.test(m[0])?"female":/con trai/i.test(m[0])?"male":"other");
+      const parts=splitPeople(m[2]);
+      parts.forEach((name,i)=>{const par=makePerson(name,i===0?"male":"female"); if(par){connectParent(child,par,par.gender);links++}});
+      continue;
+    }
+    // "Ba/Mẹ của A là B"
+    m=line.match(/^(ba|bo|cha|me|mẹ)\s+(?:cua|của)\s+(.+?)\s+(?:la|là)\s+(.+)$/i);
+    if(m){
+      const gender=/^(me|mẹ)$/i.test(m[1])?"female":"male";
+      const child=makePerson(m[2]); const par=makePerson(m[3],gender);
+      connectParent(child,par,gender); links++; continue;
+    }
+    // "A là cha/mẹ của B"
+    m=line.match(/^(.+?)\s+(?:la|là)\s+(cha|ba|bo|bố|me|mẹ)\s+(?:cua|của)\s+(.+)$/i);
+    if(m){const gender=/me|mẹ/i.test(m[2])?"female":"male";const par=makePerson(m[1],gender),child=makePerson(m[3]);connectParent(child,par,gender);links++;continue;}
+    // spouses
+    m=line.match(/^(.+?)\s+(?:la|là)\s+(vo|vợ|chong|chồng)\s+(?:cua|của)\s+(.+)$/i);
+    if(m){const female=/vo|vợ/i.test(m[2]);const a=makePerson(m[1],female?"female":"male"),b=makePerson(m[3],female?"male":"female");a.spouse=b.id;b.spouse=a.id;links++;continue;}
+    // siblings
+    m=line.match(/^(.+?)\s+(?:la|là)\s+(anh|chi|chị|em)\s+(?:cua|của)\s+(.+)$/i);
+    if(m){const a=makePerson(m[1],/chi|chị/i.test(m[2])?"female":/anh/i.test(m[2])?"male":"other"),b=makePerson(m[3]);if(!a.father&&!a.mother){a.father=b.father||"";a.mother=b.mother||""}else{if(!b.father)b.father=a.father;if(!b.mother)b.mother=a.mother}links++;continue;}
+    unresolved.push(line);
+  }
+  save();
+  return {created,links,unresolved};
+}
+function updateParsePreview(){
+  const text=$("#familyText").value.trim();
+  $("#parsePreview").innerHTML=text?"<strong>Máy sẽ đọc các câu quan hệ và tự nối người.</strong><span class=\"muted\"> Không cần điền từng ô trong form.</span>":"<span class=\"muted\">Chưa có nội dung.</span>";
+}
+function openKeyboardModal(){$("#keyboardModal").classList.remove("hidden");updateParsePreview();$("#familyText").focus()}
+function closeKeyboardModal(){$("#keyboardModal").classList.add("hidden")}
+$("#keyboardBtn").onclick=openKeyboardModal;
+$("#closeKeyboardModal").onclick=closeKeyboardModal;
+$("#cancelKeyboard").onclick=closeKeyboardModal;
+$("#familyText").oninput=updateParsePreview;
+$("#buildFamilyBtn").onclick=()=>{const text=$("#familyText").value.trim();if(!text)return;const before=people.length;const result=parseFamilyText(text);const added=people.length-before;closeKeyboardModal();selectedId=people[people.length-1]?.id||selectedId;scale=1.05;drag={...drag,l:0,t:0};renderAll();if(result.unresolved.length)alert(`Đã tạo ${added} người và nối ${result.links} quan hệ.\\n\\nCác câu máy chưa hiểu:\\n- ${result.unresolved.join("\\n- ")}\\n\\nBạn có thể viết lại theo mẫu “A là con của B và C”.`);else alert(`Đã tạo/thêm ${added} người và nối ${result.links} quan hệ.`)};
+
 $("#resetBtn").onclick=()=>{if(confirm("Khôi phục dữ liệu mẫu?")){people=JSON.parse(JSON.stringify(sample));save();selectedId="me";renderAll()}};
 $("#zoomIn").onclick=()=>{scale=Math.min(1.7,scale+.1);renderTree()};$("#zoomOut").onclick=()=>{scale=Math.max(.55,scale-.1);renderTree()};$("#zoomReset").onclick=()=>{scale=1;drag={...drag,l:0,t:0};renderTree()};
 $("#treeViewport").addEventListener("wheel",e=>{e.preventDefault();scale=Math.max(.55,Math.min(1.7,scale+(e.deltaY<0?.08:-.08)));renderTree()},{passive:false});
