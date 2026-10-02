@@ -183,3 +183,15 @@
   .position-selection-frame{border-width:2px;border-radius:10px}
   .position-selection-frame::after{font-size:9px;top:-25px}
 }
+
+
+/* Nút xóa cạnh cụm phóng to */
+.tree-tools .icon-tool{
+  width:40px;
+  padding:10px 0;
+  background:#fff0f2;
+  color:#d9435f;
+  font-weight:800;
+}
+.tree-tools .icon-tool:hover{filter:brightness(.97)}
+.profile-actions .primary.full{margin-bottom:8px}

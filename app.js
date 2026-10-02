@@ -293,6 +293,7 @@ function renderProfile(){
     </div>
     <input id="quickAvatarInput" class="hidden" type="file" accept="image/*">
   </div>`;
+  $("#quickAddSelected").onclick=()=>openRelationModal(p.id);
   $("#editSelected").onclick=()=>openModal(p.id);
   $("#changeAvatarSelected").onclick=()=>$("#quickAvatarInput").click();
   $("#quickAvatarInput").onchange=e=>{
@@ -370,6 +371,35 @@ function updateSelectionFrame(dx=0,dy=0){
   const valid=isPositionMoveValid([...positionSelection],dx,dy);
   frame.classList.toggle("invalid",!valid);
   frame.classList.toggle("valid",valid);
+}
+
+function updateDragConnectors(ids,dx,dy){
+  const canvas=document.querySelector("#treeCanvas");
+  if(!canvas)return;
+  const moving=new Set(ids);
+  canvas.querySelectorAll(".family-connectors line").forEach(line=>{
+    const shift=(raw)=>{
+      if(!raw)return [0,0];
+      let refs=[];try{refs=JSON.parse(raw)}catch{return [0,0]}
+      const hit=refs.filter(id=>moving.has(id)).length;
+      if(!hit)return [0,0];
+      const ratio=hit/Math.max(1,refs.length);
+      return [dx*ratio,dy*ratio];
+    };
+    const a=shift(line.dataset.a), b=shift(line.dataset.b);
+    const ox1=parseFloat(line.dataset.baseX1??line.getAttribute("x1"));
+    const oy1=parseFloat(line.dataset.baseY1??line.getAttribute("y1"));
+    const ox2=parseFloat(line.dataset.baseX2??line.getAttribute("x2"));
+    const oy2=parseFloat(line.dataset.baseY2??line.getAttribute("y2"));
+    if(!line.dataset.baseX1){
+      line.dataset.baseX1=ox1;line.dataset.baseY1=oy1;
+      line.dataset.baseX2=ox2;line.dataset.baseY2=oy2;
+    }
+    line.setAttribute("x1",Math.round(ox1+a[0]));
+    line.setAttribute("y1",Math.round(oy1+a[1]));
+    line.setAttribute("x2",Math.round(ox2+b[0]));
+    line.setAttribute("y2",Math.round(oy2+b[1]));
+  });
 }
 
 function applyTreeTransform(){
@@ -536,6 +566,9 @@ function renderTree(){
   };
   const shiftGroup=(g,dx)=>{
     if(!Number.isFinite(dx)||Math.abs(dx)<0.01)return;
+    // Khi người dùng đã tự đặt vị trí, không để thuật toán căn giữa
+    // kéo họ trở lại sau khi thả chuột.
+    if(g.ids.some(id=>manualPositions[`person:${id}`]))return;
     g.baseX+=dx;
     for(const id of g.ids)positions[id].x+=dx;
   };
@@ -578,13 +611,15 @@ function renderTree(){
   svg.setAttribute("class","family-connectors");
   canvas.appendChild(svg);
 
-  const line=(x1,y1,x2,y2,cls="connector-family")=>{
+  const line=(x1,y1,x2,y2,cls="connector-family",meta={})=>{
     const l=document.createElementNS("http://www.w3.org/2000/svg","line");
     l.setAttribute("x1",Math.round(x1));
     l.setAttribute("y1",Math.round(y1));
     l.setAttribute("x2",Math.round(x2));
     l.setAttribute("y2",Math.round(y2));
     l.setAttribute("class",cls);
+    if(meta.a)l.dataset.a=JSON.stringify(meta.a);
+    if(meta.b)l.dataset.b=JSON.stringify(meta.b);
     svg.appendChild(l);
   };
   const centerX=id=>positions[id].x+NODE_W/2;
@@ -597,7 +632,7 @@ function renderTree(){
     const a=positions[g.ids[0]], b=positions[g.ids[1]];
     const left=a.x<=b.x?a:b;
     const right=a.x<=b.x?b:a;
-    line(left.x+NODE_W,left.y+NODE_H/2,right.x,right.y+NODE_H/2,"connector-spouse");
+    line(left.x+NODE_W,left.y+NODE_H/2,right.x,right.y+NODE_H/2,"connector-spouse",{a:[left===a?g.ids[0]:g.ids[1]],b:[right===b?g.ids[1]:g.ids[0]]});
   }
 
   // ② Cha/mẹ -> nhóm con.
@@ -619,7 +654,7 @@ function renderTree(){
 
     if(children.length===1){
       // Không có thanh ngang giả khi chỉ có một con.
-      line(parentJoinX,parentBottom,parentJoinX,childTop,"connector-parent");
+      line(parentJoinX,parentBottom,parentJoinX,childTop,"connector-parent",{a:pg.ids,b:[children[0]]});
       continue;
     }
 
@@ -628,9 +663,9 @@ function renderTree(){
     const firstX=centerX(children[0]);
     const lastX=centerX(children[children.length-1]);
 
-    line(parentJoinX,parentBottom,parentJoinX,barY,"connector-parent");
-    line(firstX,barY,lastX,barY,"connector-siblings");
-    children.forEach(id=>line(centerX(id),barY,centerX(id),childTop,"connector-parent"));
+    line(parentJoinX,parentBottom,parentJoinX,barY,"connector-parent",{a:pg.ids,b:children});
+    line(firstX,barY,lastX,barY,"connector-siblings",{a:[children[0]],b:[children[children.length-1]]});
+    children.forEach(id=>line(centerX(id),barY,centerX(id),childTop,"connector-parent",{a:[id],b:[id]}));
   }
 
   // ③ Các cá thể nằm trên cùng hàng được đặt theo unit; một người có thể
@@ -694,6 +729,7 @@ function renderTree(){
         if(card)card.style.transform=`translate(${mx}px,${my}px)`;
       });
       updateSelectionFrame(mx,my);
+      updateDragConnectors(activePositionDrag.ids,mx,my);
     });
     el.addEventListener("pointerup",e=>{
       if(!positionMode)return;
@@ -759,7 +795,7 @@ function openRelationModal(id){
   quickParentId=id;
   const p=get(id);
   if(!p)return;
-  $("#quickAddContext").innerHTML=`<strong>Đang thêm người cho: ${esc(p.nickname||p.name)}</strong><span class="muted">Tên người mới sẽ được đặt vào quan hệ bạn chọn và tự nối vào sơ đồ.</span>`;
+  $("#quickAddContext").innerHTML=`<strong>Người được chọn: ${esc(p.nickname||p.name)}</strong><span class="muted" id="quickRolePreview">Vai trò của người mới với ${esc(p.nickname||p.name)}: <b>Con</b></span>`;
   $("#quickName").value="";
   $("#quickRelation").value="child";
   $("#quickBirthOrder").value="";
@@ -825,13 +861,18 @@ function openModal(id=""){
 function closeModal(){$("#modal").classList.add("hidden")}
 $("#addPersonBtn").onclick=()=>{if(selectedId&&get(selectedId))openRelationModal(selectedId);else openModal()};$("#closeModal").onclick=closeModal;$("#cancelBtn").onclick=closeModal;
 $("#personForm").onsubmit=e=>{e.preventDefault();const id=$("#personId").value||crypto.randomUUID();let old=get(id);const p={id,name:$("#name").value.trim(),nickname:$("#nickname").value.trim(),gender:$("#gender").value,birth:Number($("#birth").value)||"",job:$("#job").value.trim(),hometown:$("#hometown").value.trim(),father:$("#father").value,mother:$("#mother").value,spouse:$("#spouse").value,birthOrder:Number($("#birthOrder").value)||"",notes:$("#notes").value.trim(),photo:modalPhoto||old?.photo||""};if(!p.name)return;if(old)Object.assign(old,p);else people.push(p);if(p.spouse){const s=get(p.spouse);if(s)s.spouse=p.id}save();selectedId=id;closeModal();renderAll()};
-$("#deletePersonBtn").onclick=()=>{const id=$("#personId").value;if(!id)return;if(!confirm("Xóa người này?"))return;people=people.filter(p=>p.id!==id);people.forEach(p=>{if(p.father===id)p.father="";if(p.mother===id)p.mother="";if(p.spouse===id)p.spouse=""});selectedId=people[0]?.id||"";save();closeModal();renderAll()};
+$("#deletePersonBtn").onclick=()=>{const id=$("#personId").value;if(!id)return;if(!confirm("Xóa người này?"))return;people=people.filter(p=>p.id!==id);people.forEach(p=>{if(p.father===id)p.father="";if(p.mother===id)p.mother="";if(p.spouse===id)p.spouse=""});delete manualPositions[`person:${id}`];positionSelection.delete(id);selectedId=people[0]?.id||"";save();closeModal();renderAll()};
 $("#photo").onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{$("#avatarPreview").innerHTML=`<img src="${r.result}">`;const id=$("#personId").value;if(id){get(id).photo=r.result;save()}};r.readAsDataURL(f)};
 $("#mainPerson").onchange=e=>{selectedId=e.target.value;renderTree();renderProfile()};
 $("#calculateBtn").onclick=()=>{const a=$("#mainPerson").value,b=$("#targetPerson").value,r=relationship(a,b),names=r.path.map(get);$("#relationResult").innerHTML=`<div class="relation-path"><div class="path-title">Đường quan hệ</div><div class="path">${names.map((p,i)=>`<span>${esc(p.nickname||p.name)}</span>${i<names.length-1?"→":""}`).join("")}</div></div><div class="answer"><small>${esc(get(a)?.nickname||get(a)?.name)} gọi ${esc(get(b)?.nickname||get(b)?.name)} là</small><strong>${esc(r.title)}</strong></div>`};
 $("#closeRelationModal").onclick=closeRelationModal;
 $("#cancelRelation").onclick=closeRelationModal;
-$("#quickRelation").onchange=e=>$("#siblingOrderWrap").classList.toggle("hidden",e.target.value!=="sibling");
+const quickRoleLabels={child:"Con",father:"Cha / Ba",mother:"Mẹ",spouse:"Vợ / Chồng",sibling:"Anh / Chị / Em"};
+$("#quickRelation").onchange=e=>{
+  $("#siblingOrderWrap").classList.toggle("hidden",e.target.value!=="sibling");
+  const base=get(quickParentId),preview=$("#quickRolePreview");
+  if(base&&preview)preview.innerHTML=`Vai trò của người mới với ${esc(base.nickname||base.name)}: <b>${esc(quickRoleLabels[e.target.value]||e.target.value)}</b>`;
+};
 $("#createRelated").onclick=prepareRelatedPerson;
 function normalizeText(s){return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").trim()}
 function findPersonByName(name){
@@ -988,6 +1029,24 @@ $("#buildFamilyBtn").onclick=()=>{const text=$("#familyText").value.trim();if(!t
 $("#googleBtn").onclick=()=>cloud.user?googleLogout():googleLogin();
 $("#positionModeBtn").onclick=()=>{positionMode=!positionMode;clearTimeout(positionHoldTimer);activePositionDrag=null;positionSelection.clear();$("#positionModeBtn").classList.toggle("position-mode",positionMode);$("#positionModeBtn").textContent=positionMode?"✓ Xong vị trí":"↔ Chỉnh vị trí";renderTree();};
 $("#resetBtn").onclick=()=>{if(confirm("Khôi phục dữ liệu mẫu?")){people=cloneSample();manualPositions={};safeStorageSet("family-tree-positions-v4","{}");save();selectedId="me";renderAll()}};
+$("#deleteSelectedBtn").onclick=()=>{
+  const ids=positionMode&&positionSelection.size?[...positionSelection]:(selectedId?[selectedId]:[]);
+  if(!ids.length)return;
+  const names=ids.map(id=>get(id)?.nickname||get(id)?.name).filter(Boolean);
+  if(!confirm(`Xóa ${ids.length} người đã chọn${names.length?`\\n\\n${names.join(", ")}`:""}?`))return;
+  const doomed=new Set(ids);
+  people=people.filter(p=>!doomed.has(p.id));
+  people.forEach(p=>{
+    if(doomed.has(p.father))p.father="";
+    if(doomed.has(p.mother))p.mother="";
+    if(doomed.has(p.spouse))p.spouse="";
+  });
+  ids.forEach(id=>delete manualPositions[`person:${id}`]);
+  positionSelection.clear();
+  selectedId=people[0]?.id||"";
+  save();
+  renderAll();
+};
 $("#zoomIn").onclick=()=>{viewHasInteracted=true;scale=Math.min(1.7,scale+.1);renderTree()};$("#zoomOut").onclick=()=>{viewHasInteracted=true;scale=Math.max(.5,scale-.1);renderTree()};$("#zoomReset").onclick=()=>{scale=window.innerWidth<=700?.78:1;drag={...drag,l:0,t:0};viewHasInteracted=false;renderTree()};
 $("#treeViewport").addEventListener("wheel",e=>{e.preventDefault();viewHasInteracted=true;scale=Math.max(.5,Math.min(1.7,scale+(e.deltaY<0?.08:-.08)));renderTree()},{passive:false});
 $("#treeViewport").addEventListener("pointerdown",e=>{
