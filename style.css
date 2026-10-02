@@ -41,3 +41,63 @@
 .family-connectors .connector-spouse{stroke:#6657e8;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;fill:none;vector-effect:non-scaling-stroke}
 
 .position-mode{background:#eeeaff!important;color:#5a4be7!important;font-weight:700}.tree-card.position-active{cursor:grab}.tree-card.position-active:active{cursor:grabbing}
+
+/* ===== Responsive family-tree layout ===== */
+@media (max-width:700px){
+  body{overflow-x:hidden}
+  .topbar{padding:12px 14px 10px;gap:8px;display:block}
+  .eyebrow{font-size:9px;letter-spacing:1.6px}
+  .topbar h1{font-size:20px;margin:1px 0}
+  .topbar p{font-size:11px}
+  .top-actions{display:flex;flex-direction:row;gap:6px;margin-top:9px;align-items:center}
+  .top-actions button{min-width:0;padding:8px 10px;border-radius:9px;font-size:12px;white-space:nowrap}
+  .top-actions .primary{flex:1}
+  .top-actions .ghost{flex:0 0 auto}
+  .top-actions #resetBtn{font-size:0;width:38px;padding:8px 0}
+  .top-actions #resetBtn::after{content:"↻";font-size:17px}
+
+  .layout{padding:7px;gap:8px}
+  .tree-panel{height:56vh;min-height:420px;border-radius:13px}
+  .panel-head{padding:10px 11px;gap:8px;align-items:center}
+  .panel-head h2{font-size:14px;margin:0 0 2px}
+  .panel-head span{font-size:10px;line-height:1.3;display:block;max-width:170px}
+  .tree-tools{gap:4px;flex:0 0 auto}
+  .tree-tools button{height:36px;min-width:36px;padding:5px 7px;border-radius:9px;font-size:15px}
+  .tree-tools #zoomReset{font-size:11px;min-width:48px}
+  .tree-tools #positionModeBtn{font-size:0;min-width:36px}
+  .tree-tools #positionModeBtn::after{content:"⌖";font-size:17px}
+  .tree-tools #positionModeBtn.position-mode::after{content:"✓"}
+  .tree-viewport{height:auto;min-height:0;flex:1;border-radius:0 0 13px 13px}
+
+  .tree-card{width:150px;min-height:74px;height:74px;padding:8px;border-radius:13px;gap:8px}
+  .tree-card .avatar{width:40px;height:40px;border-radius:11px;font-size:19px}
+  .tree-card strong{font-size:11px}
+  .tree-card small{font-size:8px;margin-top:3px}
+
+  .side{gap:8px}
+  .relation-panel,.profile-panel{border-radius:13px}
+  .relation-panel{padding:12px}
+  .relation-panel .panel-head{margin:-12px -12px 9px;padding:10px 12px}
+  .relation-panel label{font-size:11px;margin:8px 0 4px}
+  .relation-panel select{padding:8px;font-size:13px}
+  .relation-panel .full{margin-top:9px;padding:9px}
+  .relation-help{font-size:10px}
+  .profile-panel .panel-head{padding:10px 12px}
+  .profile{padding:12px}
+  .profile-top{gap:10px}
+  .avatar{width:44px;height:44px;font-size:22px;border-radius:12px}
+  .profile h3{font-size:15px}
+  .profile .sub{font-size:10px}
+  .info-grid{gap:6px;margin-top:12px}
+  .info{padding:8px}
+  .info b{font-size:9px}
+  .info span{font-size:11px}
+  .family-list{margin-top:11px}
+  .family-list h4{font-size:10px}
+  .family-item{font-size:11px;padding:6px 0}
+  .mini{width:24px;height:24px;border-radius:7px}
+
+  .modal{padding:10px}
+  .modal-card{padding:14px;border-radius:14px;max-height:94vh}
+  .modal-head h2{font-size:18px}
+}
