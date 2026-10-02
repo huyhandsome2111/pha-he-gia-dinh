@@ -119,6 +119,35 @@
   </div>
 </div>
 
+<div id="relationModal" class="modal hidden">
+  <div class="modal-card small-modal">
+    <div class="modal-head">
+      <div>
+        <div class="eyebrow">QUAN HỆ</div>
+        <h2>Thêm người liên quan</h2>
+      </div>
+      <button id="closeRelationModal" class="icon-btn">×</button>
+    </div>
+    <div class="quick-add-context" id="quickAddContext"></div>
+    <label>Người này là...</label>
+    <select id="quickRelation">
+      <option value="child">Con</option>
+      <option value="father">Ba / Cha</option>
+      <option value="mother">Mẹ</option>
+      <option value="spouse">Vợ / Chồng</option>
+      <option value="sibling">Anh / Chị / Em</option>
+    </select>
+    <div id="siblingOrderWrap" class="hidden">
+      <label>Thứ tự sinh của người mới</label>
+      <input id="quickBirthOrder" type="number" min="1" placeholder="Ví dụ: 2">
+    </div>
+    <div class="form-actions">
+      <button type="button" id="cancelRelation" class="ghost">Hủy</button>
+      <button type="button" id="createRelated" class="primary">Tiếp tục nhập người</button>
+    </div>
+  </div>
+</div>
+
 <script src="app.js"></script>
 </body>
 </html>

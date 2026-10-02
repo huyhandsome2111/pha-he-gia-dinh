@@ -142,6 +142,7 @@ function renderProfile(){
     <button id="editSelected" class="ghost full" style="margin-top:14px">✎ Chỉnh sửa người này</button>
   </div>`;
   $("#editSelected").onclick=()=>openModal(p.id);
+  $("#addRelated").onclick=()=>openRelationModal(p.id);
 }
 function personRow(p){return p?`<div class="family-item" data-person="${p.id}"><div class="mini">${avatar(p)}</div><span>${esc(p.name)}</span></div>`:""}
 function renderTree(){
@@ -181,6 +182,46 @@ function renderAll(){renderTree();renderProfile();renderSelects();$("#relationRe
 function fillSelect(id, current){
   const el=$(id);el.innerHTML='<option value="">— Không có —</option>'+people.filter(p=>p.id!==current).map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join("");
 }
+let quickParentId="";
+function openRelationModal(id){
+  quickParentId=id;
+  const p=get(id);
+  if(!p)return;
+  $("#quickAddContext").innerHTML=`<strong>Đang thêm người cho: ${esc(p.nickname||p.name)}</strong><span class="muted">Sau khi chọn quan hệ, app sẽ tự nối người mới vào đúng vị trí.</span>`;
+  $("#quickRelation").value="child";
+  $("#quickBirthOrder").value="";
+  $("#siblingOrderWrap").classList.add("hidden");
+  $("#relationModal").classList.remove("hidden");
+}
+function closeRelationModal(){$("#relationModal").classList.add("hidden");quickParentId=""}
+function prepareRelatedPerson(){
+  const base=get(quickParentId); if(!base)return;
+  const rel=$("#quickRelation").value;
+  const id=crypto.randomUUID();
+  const p={id,name:"",nickname:"",gender:rel==="mother"?"female":rel==="father"?"male":rel==="spouse"?(base.gender==="male"?"female":"male"):"male",birth:"",job:"",hometown:"",father:"",mother:"",spouse:"",birthOrder:Number($("#quickBirthOrder").value)||"",notes:"",photo:""};
+  // Đóng hộp chọn quan hệ rồi mở form người mới với quan hệ đã được gắn sẵn.
+  people.push(p);
+  const baseId=base.id;
+  if(rel==="child"){
+    if(base.gender==="female") p.mother=baseId; else p.father=baseId;
+  }else if(rel==="father"){
+    const old=base.father; p.father=old?old:""; base.father=id;
+  }else if(rel==="mother"){
+    const old=base.mother; p.mother=old?old:""; base.mother=id;
+  }else if(rel==="spouse"){
+    p.spouse=baseId; base.spouse=id;
+  }else if(rel==="sibling"){
+    p.father=base.father||""; p.mother=base.mother||"";
+    if(!p.birthOrder)p.birthOrder=(base.birthOrder||1)+1;
+  }
+  // Nếu tạo cha/mẹ, giữ vợ/chồng của cha/mẹ quando có thể để sơ đồ đầy đủ hơn.
+  if(rel==="father" && base.mother){p.spouse=base.mother;const m=get(base.mother);if(m)m.spouse=id}
+  if(rel==="mother" && base.father){p.spouse=base.father;const f=get(base.father);if(f)f.spouse=id}
+  save();
+  closeRelationModal();
+  selectedId=id;
+  openModal(id);
+}
 function openModal(id=""){
   $("#modal").classList.remove("hidden");$("#personId").value=id;$("#modalTitle").textContent=id?"Chỉnh sửa người":"Thêm người";$("#deletePersonBtn").classList.toggle("hidden",!id);
   const p=id?get(id):{name:"",nickname:"",gender:"male",birth:"",job:"",hometown:"",father:"",mother:"",spouse:"",birthOrder:"",notes:"",photo:""};
@@ -196,6 +237,10 @@ $("#deletePersonBtn").onclick=()=>{const id=$("#personId").value;if(!id)return;i
 $("#photo").onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{$("#avatarPreview").innerHTML=`<img src="${r.result}">`;const id=$("#personId").value;if(id){get(id).photo=r.result;save()}};r.readAsDataURL(f)};
 $("#mainPerson").onchange=e=>{selectedId=e.target.value;renderTree();renderProfile()};
 $("#calculateBtn").onclick=()=>{const a=$("#mainPerson").value,b=$("#targetPerson").value,r=relationship(a,b),names=r.path.map(get);$("#relationResult").innerHTML=`<div class="relation-path"><div class="path-title">Đường quan hệ</div><div class="path">${names.map((p,i)=>`<span>${esc(p.nickname||p.name)}</span>${i<names.length-1?"→":""}`).join("")}</div></div><div class="answer"><small>${esc(get(a)?.nickname||get(a)?.name)} gọi ${esc(get(b)?.nickname||get(b)?.name)} là</small><strong>${esc(r.title)}</strong></div>`};
+$("#closeRelationModal").onclick=closeRelationModal;
+$("#cancelRelation").onclick=closeRelationModal;
+$("#quickRelation").onchange=e=>$("#siblingOrderWrap").classList.toggle("hidden",e.target.value!=="sibling");
+$("#createRelated").onclick=prepareRelatedPerson;
 $("#resetBtn").onclick=()=>{if(confirm("Khôi phục dữ liệu mẫu?")){people=JSON.parse(JSON.stringify(sample));save();selectedId="me";renderAll()}};
 $("#zoomIn").onclick=()=>{scale=Math.min(1.7,scale+.1);renderTree()};$("#zoomOut").onclick=()=>{scale=Math.max(.55,scale-.1);renderTree()};$("#zoomReset").onclick=()=>{scale=1;drag={...drag,l:0,t:0};renderTree()};
 $("#treeViewport").addEventListener("wheel",e=>{e.preventDefault();scale=Math.max(.55,Math.min(1.7,scale+(e.deltaY<0?.08:-.08)));renderTree()},{passive:false});
