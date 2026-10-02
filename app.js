@@ -48,7 +48,76 @@ function sanitizePeople(data){
   return out;
 }
 function load(){const raw=safeStorageGet(KEY);if(!raw)return cloneSample();try{return sanitizePeople(JSON.parse(raw))}catch{return cloneSample()}}
-function save(){safeStorageSet(KEY,JSON.stringify(people))}
+let cloud={ready:false,user:null,db:null,saveTimer:null};
+function firebaseConfigured(){
+  const c=window.FIREBASE_CONFIG||{};
+  return c.apiKey && !String(c.apiKey).startsWith("YOUR_") && c.projectId && !String(c.projectId).startsWith("YOUR_");
+}
+function setSyncStatus(text){
+  let el=document.querySelector("#syncStatus");
+  if(!el){el=document.createElement("span");el.id="syncStatus";el.className="sync-status";document.querySelector(".top-actions")?.appendChild(el)}
+  el.textContent=text||"";
+}
+function save(){
+  safeStorageSet(KEY,JSON.stringify(people));
+  if(cloud.ready&&cloud.db&&cloud.user){
+    clearTimeout(cloud.saveTimer);
+    setSyncStatus("Đang lưu…");
+    cloud.saveTimer=setTimeout(async()=>{
+      try{
+        await cloud.db.collection("users").doc(cloud.user.uid).set({people,manualPositions,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+        setSyncStatus("Đã đồng bộ");
+      }catch(err){console.error(err);setSyncStatus("Lỗi đồng bộ")}
+    },500);
+  }
+}
+async function initGoogleSync(){
+  if(!firebaseConfigured()){setSyncStatus("Chưa cấu hình Google");return;}
+  try{
+    if(!firebase.apps.length)firebase.initializeApp(window.FIREBASE_CONFIG);
+    cloud.db=firebase.firestore();
+    firebase.auth().onAuthStateChanged(async user=>{
+      cloud.user=user||null;
+      if(!user){cloud.ready=false;setSyncStatus("Chưa đăng nhập");updateGoogleButton();return;}
+      setSyncStatus("Đang đồng bộ…");
+      try{
+        const ref=cloud.db.collection("users").doc(user.uid);
+        const snap=await ref.get();
+        if(snap.exists&&Array.isArray(snap.data().people)){
+          people=sanitizePeople(snap.data().people);
+          manualPositions=snap.data().manualPositions&&typeof snap.data().manualPositions==="object"?snap.data().manualPositions:{};
+          safeStorageSet(KEY,JSON.stringify(people));
+          safeStorageSet("family-tree-positions-v4",JSON.stringify(manualPositions));
+          selectedId=get(selectedId)?selectedId:(people.find(p=>p.id==="me")?.id||people[0]?.id||"");
+          renderAll();
+        }else{
+          await ref.set({people,manualPositions,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+        }
+        cloud.ready=true;
+        setSyncStatus(`✓ ${user.displayName||user.email||"Google"}`);
+      }catch(err){console.error(err);setSyncStatus("Lỗi đồng bộ")}
+      updateGoogleButton();
+    });
+  }catch(err){console.error(err);setSyncStatus("Không khởi tạo được Google")}
+}
+function updateGoogleButton(){
+  const btn=document.querySelector("#googleBtn");
+  if(!btn)return;
+  if(cloud.user){btn.textContent="↪ Đăng xuất Google";btn.title=cloud.user.email||"";}
+  else btn.textContent="G Đăng nhập Google";
+}
+async function googleLogin(){
+  if(!firebaseConfigured()){
+    alert("Chưa cấu hình Firebase. Hãy mở firebase-config.js và điền cấu hình Web App của dự án Firebase trước khi đăng nhập Google.");
+    return;
+  }
+  try{
+    const provider=new firebase.auth.GoogleAuthProvider();
+    await firebase.auth().signInWithPopup(provider);
+  }catch(err){console.error(err);alert("Không đăng nhập được Google: "+(err.message||err));}
+}
+async function googleLogout(){try{await firebase.auth().signOut()}catch(err){console.error(err)}}
+
 const $=s=>document.querySelector(s);
 function get(id){return people.find(p=>p.id===id)}
 function esc(s=""){return s.replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
@@ -557,39 +626,50 @@ function renderTree(){
 
     let downX=0,downY=0,moved=false;
     const clearHold=()=>{if(positionHoldTimer){clearTimeout(positionHoldTimer);positionHoldTimer=null}};
+    const isTouchLike=()=>window.matchMedia?.("(pointer: coarse)")?.matches || window.innerWidth<=700;
+    const toggleSelection=()=>{
+      if(positionSelection.has(p.id))positionSelection.delete(p.id);
+      else positionSelection.add(p.id);
+      selectedId=p.id;
+      renderPositionSelection();
+    };
     el.addEventListener("pointerdown",e=>{
       if(!positionMode)return;
       e.stopPropagation();
       downX=e.clientX;downY=e.clientY;moved=false;
       el.setPointerCapture?.(e.pointerId);
-      const already=positionSelection.has(p.id);
-      if(already){
-        activePositionDrag={pointerId:e.pointerId,ids:[...positionSelection],startX:e.clientX,startY:e.clientY};
+      // PC: Ctrl/Cmd + click để đa chọn.
+      if(!isTouchLike() && (e.ctrlKey||e.metaKey)){
+        clearHold();
+        toggleSelection();
+        return;
+      }
+      // Người đã chọn: kéo ngay cả trên PC lẫn điện thoại.
+      if(positionSelection.has(p.id)){
+        activePositionDrag={pointerId:e.pointerId,ids:[...positionSelection],startX:e.clientX,startY:e.clientY,dx:0,dy:0};
         updateSelectionFrame();
         return;
       }
+      // Mobile/PC: nhấn giữ người chưa chọn để thêm vào nhóm.
       clearHold();
       positionHoldTimer=setTimeout(()=>{
         positionHoldTimer=null;
         positionSelection.add(p.id);
         selectedId=p.id;
         renderPositionSelection();
-      },320);
+      },isTouchLike()?280:360);
     });
     el.addEventListener("pointermove",e=>{
       if(!positionMode)return;
       const dx=e.clientX-downX,dy=e.clientY-downY;
       if(Math.abs(dx)>6||Math.abs(dy)>6){
         moved=true;
-        if(positionHoldTimer){clearHold();}
+        clearHold();
       }
       if(!activePositionDrag)return;
-      const sx=activePositionDrag.startX,sy=activePositionDrag.startY;
-      const mx=(e.clientX-sx)/scale,my=(e.clientY-sy)/scale;
+      const mx=(e.clientX-activePositionDrag.startX)/scale,my=(e.clientY-activePositionDrag.startY)/scale;
       activePositionDrag.dx=mx;activePositionDrag.dy=my;
-      const ids=activePositionDrag.ids;
-      ids.forEach(id=>{
-        const base=positions[id];
+      activePositionDrag.ids.forEach(id=>{
         const card=canvas.querySelector(`[data-card-id="${id}"]`);
         if(card)card.style.transform=`translate(${mx}px,${my}px)`;
       });
@@ -599,7 +679,10 @@ function renderTree(){
       if(!positionMode)return;
       clearHold();
       if(!activePositionDrag){
-        if(!moved)renderPositionSelection();
+        if(!moved && isTouchLike() && positionSelection.size && !positionSelection.has(p.id)){
+          // Chạm thêm trên điện thoại cũng cho phép đa chọn sau khi đã có một mục tiêu.
+          toggleSelection();
+        }
         return;
       }
       const dragState=activePositionDrag;activePositionDrag=null;
@@ -611,6 +694,7 @@ function renderTree(){
           manualPositions[`person:${id}`]={x:Math.round(base.x+dx),y:Math.round(base.y+dy)};
         });
         safeStorageSet("family-tree-positions-v4",JSON.stringify(manualPositions));
+        save();
       }
       renderTree();
     });
@@ -881,7 +965,8 @@ $("#cancelKeyboard").onclick=closeKeyboardModal;
 $("#familyText").oninput=updateParsePreview;
 $("#buildFamilyBtn").onclick=()=>{const text=$("#familyText").value.trim();if(!text)return;const before=people.length;const result=parseFamilyText(text);const added=people.length-before;closeKeyboardModal();selectedId=people[people.length-1]?.id||selectedId;scale=window.innerWidth<=700?.78:1;drag={...drag,l:0,t:0};viewHasInteracted=false;renderAll();if(result.unresolved.length)alert(`Đã tạo ${added} người và nối ${result.links} quan hệ.\\n\\nCác câu máy chưa hiểu:\\n- ${result.unresolved.join("\\n- ")}\\n\\nBạn có thể viết lại theo mẫu “A là con của B và C”.`);else alert(`Đã tạo/thêm ${added} người và nối ${result.links} quan hệ.`)};
 
-$("#positionModeBtn").onclick=()=>{positionMode=!positionMode;clearTimeout(positionHoldTimer);activePositionDrag=null;positionSelection.clear();$("#positionModeBtn").classList.toggle("position-mode",positionMode);$("#positionModeBtn").textContent=positionMode?"✓ Xong vị trí":"↔ Chỉnh vị trí";renderTree()};
+$("#googleBtn").onclick=()=>cloud.user?googleLogout():googleLogin();
+$("#positionModeBtn").onclick=()=>{positionMode=!positionMode;clearTimeout(positionHoldTimer);activePositionDrag=null;positionSelection.clear();$("#positionModeBtn").classList.toggle("position-mode",positionMode);$("#positionModeBtn").textContent=positionMode?"✓ Xong vị trí":"↔ Chỉnh vị trí";renderTree();};
 $("#resetBtn").onclick=()=>{if(confirm("Khôi phục dữ liệu mẫu?")){people=cloneSample();manualPositions={};safeStorageSet("family-tree-positions-v4","{}");save();selectedId="me";renderAll()}};
 $("#zoomIn").onclick=()=>{viewHasInteracted=true;scale=Math.min(1.7,scale+.1);renderTree()};$("#zoomOut").onclick=()=>{viewHasInteracted=true;scale=Math.max(.5,scale-.1);renderTree()};$("#zoomReset").onclick=()=>{scale=window.innerWidth<=700?.78:1;drag={...drag,l:0,t:0};viewHasInteracted=false;renderTree()};
 $("#treeViewport").addEventListener("wheel",e=>{e.preventDefault();viewHasInteracted=true;scale=Math.max(.5,Math.min(1.7,scale+(e.deltaY<0?.08:-.08)));renderTree()},{passive:false});
@@ -900,6 +985,7 @@ $("#treeViewport").addEventListener("pointermove",e=>{
 $("#treeViewport").addEventListener("pointerup",()=>{drag.on=false;drag.cardId=""});
 $("#treeViewport").addEventListener("pointercancel",()=>{drag.on=false;drag.cardId=""});
 document.addEventListener("click",e=>{const row=e.target.closest("[data-person]");if(row){selectedId=row.dataset.person;renderAll()}});
+initGoogleSync();
 try{renderAll()}catch(err){
   console.error(err);people=cloneSample();manualPositions={};safeStorageSet(KEY,JSON.stringify(people));safeStorageSet("family-tree-positions-v4","{}");selectedId="me";
   try{renderAll()}catch(err2){console.error(err2)}

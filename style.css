@@ -143,3 +143,43 @@
 @media(max-width:700px){
   .position-selection-frame{border-width:2px;border-radius:10px}
 }
+
+/* ===== PC + mobile: multi-select chỉnh vị trí ===== */
+.tree-card.position-selected{
+  border-color:#2dbb72!important;
+  box-shadow:0 0 0 3px rgba(45,187,114,.18),0 10px 28px rgba(50,60,90,.12)!important;
+}
+.position-selection-frame{
+  position:absolute;
+  z-index:5;
+  pointer-events:none;
+  border:2px solid #2dbb72;
+  border-radius:12px;
+  background:rgba(45,187,114,.06);
+  box-shadow:0 0 0 2px rgba(255,255,255,.7) inset;
+  transition:border-color .08s ease,background .08s ease,box-shadow .08s ease;
+}
+.position-selection-frame.invalid{
+  border-color:#e34b5f;
+  background:rgba(227,75,95,.08);
+  box-shadow:0 0 0 2px rgba(255,255,255,.7) inset;
+}
+.position-selection-frame.valid{border-color:#2dbb72}
+.position-selection-frame::after{
+  content:'✓ Vị trí hợp lý';
+  position:absolute;left:8px;top:-27px;
+  padding:4px 7px;border-radius:7px;font-size:10px;font-weight:800;
+  background:#2dbb72;color:#fff;white-space:nowrap;
+}
+.position-selection-frame.invalid::after{content:'! Vị trí không hợp lý';background:#e34b5f}
+.position-mode{background:#eeeaff!important;color:#5a4be7!important;font-weight:700}
+.tree-card.position-active{cursor:grab}
+.tree-card.position-active:active{cursor:grabbing}
+#googleBtn{white-space:nowrap}
+.sync-status{font-size:10px;color:var(--muted);margin-left:8px;align-self:center}
+@media(max-width:700px){
+  .top-actions #googleBtn{font-size:0;width:38px;padding:8px 0}
+  .top-actions #googleBtn::after{content:'G';font-size:15px;font-weight:800}
+  .position-selection-frame{border-width:2px;border-radius:10px}
+  .position-selection-frame::after{font-size:9px;top:-25px}
+}
