@@ -279,7 +279,17 @@ function renderTree(){
     const l=document.createElementNS("http://www.w3.org/2000/svg","line");
     l.setAttribute("x1",x1); l.setAttribute("y1",y1);
     l.setAttribute("x2",x2); l.setAttribute("y2",y2);
-    l.setAttribute("class",cls); l.setAttribute("vector-effect","non-scaling-stroke"); svg.appendChild(l);
+    l.setAttribute("class",cls); l.setAttribute("vector-effect","non-scaling-stroke");
+    svg.appendChild(l);
+    return l;
+  };
+  const path=(d,cls="")=>{
+    const el=document.createElementNS("http://www.w3.org/2000/svg","path");
+    el.setAttribute("d",d); el.setAttribute("class",cls);
+    el.setAttribute("vector-effect","non-scaling-stroke");
+    el.setAttribute("fill","none");
+    svg.appendChild(el);
+    return el;
   };
 
   const center=p=>({x:p.x+NODE_W/2,y:p.y+NODE_H/2});
@@ -289,7 +299,7 @@ function renderTree(){
   const doneCouples=new Set();
   const doneSiblingBars=new Set();
 
-  // 1) Vợ/chồng: đường ngang ở chính giữa hai card.
+  // 1) Vợ/chồng: đường ngang liền, đúng giữa hai khung.
   people.forEach(p=>{
     if(!p.spouse||!positions[p.id]||!positions[p.spouse])return;
     const key=coupleKey(p.id,p.spouse);
@@ -300,8 +310,9 @@ function renderTree(){
     line(left.x+NODE_W, left.y+NODE_H/2, right.x, right.y+NODE_H/2, "connector-spouse");
   });
 
-  // 2) Cha mẹ -> con: một đường dọc từ giữa cặp vợ/chồng xuống thanh anh/chị/em.
-  // 3) Anh/chị/em cùng thế hệ: nối bằng một thanh ngang rồi đi dọc xuống từng card.
+  // 2 + 3) Nối cha mẹ -> thanh anh/chị/em -> từng người con bằng MỘT path liên tục.
+  // Theo đúng kiểu pedigree: từ giữa đường vợ/chồng đi xuống, qua thanh ngang anh/chị/em,
+  // rồi đi thẳng xuống giữa từng khung con. Không có đoạn rời hay khoảng hở tại các nút nối.
   const processedParentGroups=new Set();
   people.forEach(parent=>{
     const spouse=parent.spouse?get(parent.spouse):null;
@@ -315,25 +326,24 @@ function renderTree(){
     if(processedParentGroups.has(key))return;
     processedParentGroups.add(key);
 
-    const parentCenters=validParentIds.map(id=>center(positions[id]).x);
+    const parentCenters=validParentIds.map(id=>center(positions[id]));
     const junctionX=validParentIds.length===2
-      ? (Math.min(...parentCenters)+Math.max(...parentCenters))/2
-      : parentCenters[0];
-    const parentBottom=Math.max(...validParentIds.map(id=>bottom(positions[id])));
+      ? (parentCenters[0].x+parentCenters[1].x)/2
+      : parentCenters[0].x;
+    const marriageY=parentCenters.reduce((sum,c)=>sum+c.y,0)/parentCenters.length;
     const childTop=Math.min(...kids.map(k=>top(positions[k.id])));
-    const siblingY=parentBottom+(childTop-parentBottom)/2;
-
-    line(junctionX,parentBottom,junctionX,siblingY,"connector-parent");
-
+    // Khoảng đặt thanh anh/chị/em nằm giữa thế hệ cha mẹ và con, cách đều hai phía.
+    const siblingY=marriageY+(childTop-marriageY)/2;
     const childXs=[...new Set(kids.map(k=>center(positions[k.id]).x))].sort((a,b)=>a-b);
-    if(childXs.length>1){
-      const barKey=key+"=>"+childXs.join(",");
-      if(!doneSiblingBars.has(barKey)){
-        doneSiblingBars.add(barKey);
-        line(childXs[0],siblingY,childXs[childXs.length-1],siblingY,"connector-siblings");
-      }
-    }
-    childXs.forEach(cx=>line(cx,siblingY,cx,childTop,"connector-parent"));
+
+    // Một path duy nhất: điểm hôn nhân -> thanh anh/chị/em.
+    let d=`M ${junctionX} ${marriageY} L ${junctionX} ${siblingY}`;
+    if(childXs.length>1) d+=` M ${childXs[0]} ${siblingY} L ${childXs[childXs.length-1]} ${siblingY}`;
+    else d+=` M ${junctionX} ${siblingY} L ${junctionX} ${siblingY}`;
+
+    // Các nhánh con được nối liền vào đúng thanh ngang và chạm sát mép trên card.
+    childXs.forEach(cx=>{ d+=` M ${cx} ${siblingY} L ${cx} ${childTop}`; });
+    path(d,"connector-family");
   });
 
   // Trường hợp chỉ biết một cha/mẹ và người đó không có spouse.
@@ -343,14 +353,11 @@ function renderTree(){
     if(parents.length!==1)return;
     const parent=get(parents[0]);
     if(parent.spouse&&get(parent.spouse)&&positions[parent.spouse])return;
-    const px=center(positions[parent.id]).x;
-    const py=bottom(positions[parent.id]);
-    const cx=center(positions[child.id]).x;
-    const cy=top(positions[child.id]);
+    const pp=positions[parent.id], cp=positions[child.id];
+    const px=center(pp).x, py=center(pp).y;
+    const cx=center(cp).x, cy=top(cp);
     const mid=py+(cy-py)/2;
-    line(px,py,px,mid,"connector-parent");
-    line(px,mid,cx,mid,"connector-siblings");
-    line(cx,mid,cx,cy,"connector-parent");
+    path(`M ${px} ${py} L ${px} ${mid} L ${cx} ${mid} L ${cx} ${cy}`,"connector-family");
   });
 
   // Card người: giữ nguyên giao diện đẹp, avatar, tên và thao tác chọn/sửa.

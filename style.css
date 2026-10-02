@@ -35,3 +35,7 @@
 .family-connectors .connector-spouse{stroke:#6657e8;stroke-width:3}
 .family-connectors .connector-parent,.family-connectors .connector-siblings{stroke:#7f8794;stroke-width:2.5}
 .tree-card{z-index:2}
+
+/* Đường nối phả hệ luôn là nét liền và nối liên tục tại mọi nút. */
+.family-connectors .connector-family{stroke:#7f8794;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;fill:none;vector-effect:non-scaling-stroke}
+.family-connectors .connector-spouse{stroke:#6657e8;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;fill:none;vector-effect:non-scaling-stroke}
