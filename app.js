@@ -17,7 +17,7 @@ let people=load(), selectedId="me", scale=1, drag={on:false,x:0,y:0,l:0,t:0};
 let modalPhoto="";
 let positionMode=false;
 let manualPositions={};
-try{manualPositions=JSON.parse(safeStorageGet("family-tree-positions-v1")||"{}")}catch{manualPositions={}}
+try{manualPositions=JSON.parse(safeStorageGet("family-tree-positions-v2")||"{}")}catch{manualPositions={}}
 
 function cloneSample(){return JSON.parse(JSON.stringify(sample))}
 function safeStorageGet(key){try{return localStorage.getItem(key)}catch{return null}}
@@ -376,7 +376,10 @@ function renderTree(){
     g.baseX+=dx;
     for(const id of g.ids)positions[id].x+=dx;
   };
-  // Làm từ thế hệ thấp lên để mỗi cặp được căn theo chính các con của nó.
+  // Làm từ thế hệ thấp lên để mỗi cặp cha/mẹ nằm đúng trên TÂM của nhóm con.
+  // Quan trọng: chỉ lấy vị trí của người con (childId), KHÔNG lấy vợ/chồng
+  // của người con vào phép tính. Vì vậy Ba-Mẹ và Chú-Thím không làm lệch
+  // vị trí anh/chị/em của Ba và Chú.
   [...groups].sort((a,b)=>b.depth-a.depth).forEach(g=>{
     if(!g.children.length)return;
     const childCenter=centerOfGroup(g);
@@ -387,8 +390,20 @@ function renderTree(){
     shiftGroup(g,childCenter-ownCenter);
   });
 
+  // Sau khi căn giữa, một nhánh có thể bị đẩy sang trái. Dịch TOÀN BỘ
+  // sơ đồ sang phải một khoảng nhỏ để không có node/đường nào nằm ngoài canvas.
+  const minX=Math.min(...Object.values(positions).map(p=>p.x));
+  if(Number.isFinite(minX) && minX<PAD){
+    const dx=PAD-minX;
+    groups.forEach(g=>{
+      g.baseX+=dx;
+      g.ids.forEach(id=>{positions[id].x+=dx});
+    });
+  }
+
   const maxDepth=Math.max(0,...groups.map(g=>g.depth));
-  const canvasWidth=Math.max(MIN_WIDTH,cursor+PAD);
+  const maxRight=Math.max(...Object.values(positions).map(p=>p.x+NODE_W));
+  const canvasWidth=Math.max(MIN_WIDTH,cursor+PAD,maxRight+PAD);
   const canvasHeight=(maxDepth+1)*ROW_H+150;
   canvas.style.width=canvasWidth+"px";
   canvas.style.height=canvasHeight+"px";
@@ -505,7 +520,7 @@ function renderTree(){
       }else{
         delete manualPositions[g.anchor];
       }
-      safeStorageSet("family-tree-positions-v1",JSON.stringify(manualPositions));
+      safeStorageSet("family-tree-positions-v2",JSON.stringify(manualPositions));
       renderTree();
     });
     el.addEventListener("pointercancel",()=>{startG=null;el.style.transform="";renderTree()});
@@ -759,7 +774,7 @@ $("#familyText").oninput=updateParsePreview;
 $("#buildFamilyBtn").onclick=()=>{const text=$("#familyText").value.trim();if(!text)return;const before=people.length;const result=parseFamilyText(text);const added=people.length-before;closeKeyboardModal();selectedId=people[people.length-1]?.id||selectedId;scale=1.05;drag={...drag,l:0,t:0};renderAll();if(result.unresolved.length)alert(`Đã tạo ${added} người và nối ${result.links} quan hệ.\\n\\nCác câu máy chưa hiểu:\\n- ${result.unresolved.join("\\n- ")}\\n\\nBạn có thể viết lại theo mẫu “A là con của B và C”.`);else alert(`Đã tạo/thêm ${added} người và nối ${result.links} quan hệ.`)};
 
 $("#positionModeBtn").onclick=()=>{positionMode=!positionMode;$("#positionModeBtn").classList.toggle("position-mode",positionMode);$("#positionModeBtn").textContent=positionMode?"✓ Xong vị trí":"↔ Chỉnh vị trí";renderTree()};
-$("#resetBtn").onclick=()=>{if(confirm("Khôi phục dữ liệu mẫu?")){people=cloneSample();manualPositions={};safeStorageSet("family-tree-positions-v1","{}");save();selectedId="me";renderAll()}};
+$("#resetBtn").onclick=()=>{if(confirm("Khôi phục dữ liệu mẫu?")){people=cloneSample();manualPositions={};safeStorageSet("family-tree-positions-v2","{}");save();selectedId="me";renderAll()}};
 $("#zoomIn").onclick=()=>{scale=Math.min(1.7,scale+.1);renderTree()};$("#zoomOut").onclick=()=>{scale=Math.max(.55,scale-.1);renderTree()};$("#zoomReset").onclick=()=>{scale=1;drag={...drag,l:0,t:0};renderTree()};
 $("#treeViewport").addEventListener("wheel",e=>{e.preventDefault();scale=Math.max(.55,Math.min(1.7,scale+(e.deltaY<0?.08:-.08)));renderTree()},{passive:false});
 $("#treeViewport").addEventListener("pointerdown",e=>{
@@ -777,6 +792,6 @@ $("#treeViewport").addEventListener("pointerup",()=>{drag.on=false;drag.cardId="
 $("#treeViewport").addEventListener("pointercancel",()=>{drag.on=false;drag.cardId=""});
 document.addEventListener("click",e=>{const row=e.target.closest("[data-person]");if(row){selectedId=row.dataset.person;renderAll()}});
 try{renderAll()}catch(err){
-  console.error(err);people=cloneSample();manualPositions={};safeStorageSet(KEY,JSON.stringify(people));safeStorageSet("family-tree-positions-v1","{}");selectedId="me";
+  console.error(err);people=cloneSample();manualPositions={};safeStorageSet(KEY,JSON.stringify(people));safeStorageSet("family-tree-positions-v2","{}");selectedId="me";
   try{renderAll()}catch(err2){console.error(err2)}
 }
