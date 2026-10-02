@@ -16,6 +16,7 @@
     </div>
     <div class="top-actions">
       <button id="addPersonBtn" class="primary">＋ Thêm người</button>
+      <button id="keyboardBtn" class="ghost">⌨ Nhập bằng bàn phím</button>
       <button id="resetBtn" class="ghost">↺ Dữ liệu mẫu</button>
     </div>
   </header>
@@ -116,6 +117,30 @@
         <button class="primary" type="submit">Lưu người</button>
       </div>
     </form>
+  </div>
+</div>
+
+<div id="keyboardModal" class="modal hidden">
+  <div class="modal-card small-modal">
+    <div class="modal-head">
+      <div>
+        <div class="eyebrow">NHẬP BẰNG BÀN PHÍM</div>
+        <h2>Tự dựng phả hệ</h2>
+      </div>
+      <button id="closeKeyboardModal" class="icon-btn">×</button>
+    </div>
+    <p class="muted">Viết tự nhiên theo từng dòng. Hệ thống sẽ đọc các từ như <b>cha, mẹ, con, vợ, chồng, anh, chị, em</b> rồi tự tạo người và nối sơ đồ.</p>
+    <textarea id="familyText" rows="10" placeholder="Ví dụ:
+Tôi là con của Nguyễn Văn A và Trần Thị B
+Nguyễn Văn A là chồng của Trần Thị B
+Nguyễn Văn A là con của Nguyễn Văn C và Lê Thị D
+Nguyễn Văn C là chồng của Lê Thị D"></textarea>
+    <div id="parsePreview" class="quick-add-context" style="margin-top:12px"></div>
+    <div class="form-actions">
+      <button type="button" id="cancelKeyboard" class="ghost">Hủy</button>
+      <div class="grow"></div>
+      <button type="button" id="buildFamilyBtn" class="primary">✦ Tự hiểu & vẽ sơ đồ</button>
+    </div>
   </div>
 </div>
 
