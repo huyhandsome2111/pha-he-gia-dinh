@@ -18,7 +18,10 @@ let viewHasInteracted=false;
 let modalPhoto="";
 let positionMode=false;
 let manualPositions={};
-try{manualPositions=JSON.parse(safeStorageGet("family-tree-positions-v3")||"{}")}catch{manualPositions={}}
+let positionSelection=new Set();
+let activePositionDrag=null;
+let positionHoldTimer=null;
+try{manualPositions=JSON.parse(safeStorageGet("family-tree-positions-v4")||"{}")}catch{manualPositions={}}
 
 function cloneSample(){return JSON.parse(JSON.stringify(sample))}
 function safeStorageGet(key){try{return localStorage.getItem(key)}catch{return null}}
@@ -218,6 +221,68 @@ function renderProfile(){
   };
 }
 function personRow(p){return p?`<div class="family-item" data-person="${p.id}"><div class="mini">${avatar(p)}</div><span>${esc(p.name)}</span></div>`:""}
+function getPositionBox(ids,dx=0,dy=0){
+  const canvas=document.querySelector("#treeCanvas");
+  if(!canvas||!ids.length)return null;
+  const cards=ids.map(id=>{
+    const el=canvas.querySelector(`[data-card-id="${id}"]`);
+    if(!el)return null;
+    const x=parseFloat(el.style.left)||0,y=parseFloat(el.style.top)||0;
+    return {id,x:x+dx,y:y+dy,w:el.offsetWidth||NODE_W,h:el.offsetHeight||NODE_H};
+  }).filter(Boolean);
+  if(!cards.length)return null;
+  const minX=Math.min(...cards.map(c=>c.x)),minY=Math.min(...cards.map(c=>c.y));
+  const maxX=Math.max(...cards.map(c=>c.x+c.w)),maxY=Math.max(...cards.map(c=>c.y+c.h));
+  return {minX,minY,maxX,maxY,w:maxX-minX,h:maxY-minY};
+}
+function isPositionMoveValid(ids,dx,dy){
+  const canvas=document.querySelector("#treeCanvas");
+  const box=getPositionBox(ids,dx,dy);
+  if(!canvas||!box)return false;
+  const pad=12;
+  const cw=canvas.offsetWidth||MIN_WIDTH,ch=canvas.offsetHeight||800;
+  if(box.minX<pad||box.minY<pad||box.maxX>cw-pad||box.maxY>ch-pad)return false;
+  const moving=new Set(ids);
+  const cards=[...canvas.querySelectorAll(".tree-card")].map(el=>({
+    id:el.dataset.cardId,x:parseFloat(el.style.left)||0,y:parseFloat(el.style.top)||0,w:el.offsetWidth||NODE_W,h:el.offsetHeight||NODE_H
+  }));
+  const movedCards=cards.filter(c=>moving.has(c.id)).map(c=>({...c,x:c.x+dx,y:c.y+dy}));
+  const still=cards.filter(c=>!moving.has(c.id));
+  const gap=10;
+  for(const a of movedCards){
+    for(const b of still){
+      const overlap=a.x < b.x+b.w+gap && a.x+a.w+gap > b.x && a.y < b.y+b.h+gap && a.y+a.h+gap > b.y;
+      if(overlap)return false;
+    }
+  }
+  for(let i=0;i<movedCards.length;i++)for(let j=i+1;j<movedCards.length;j++){
+    const a=movedCards[i],b=movedCards[j];
+    const overlap=a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y;
+    if(overlap)return false;
+  }
+  return true;
+}
+function renderPositionSelection(){
+  document.querySelectorAll(".tree-card.position-selected").forEach(el=>el.classList.remove("position-selected"));
+  const canvas=document.querySelector("#treeCanvas");
+  if(!canvas)return;
+  positionSelection.forEach(id=>canvas.querySelector(`[data-card-id="${id}"]`)?.classList.add("position-selected"));
+  updateSelectionFrame();
+}
+function updateSelectionFrame(dx=0,dy=0){
+  const canvas=document.querySelector("#treeCanvas");
+  if(!canvas)return;
+  let frame=canvas.querySelector(".position-selection-frame");
+  if(!positionSelection.size){if(frame)frame.remove();return;}
+  const box=getPositionBox([...positionSelection],dx,dy);
+  if(!box){if(frame)frame.remove();return;}
+  if(!frame){frame=document.createElement("div");frame.className="position-selection-frame";canvas.appendChild(frame);}
+  frame.style.left=(box.minX-8)+"px";frame.style.top=(box.minY-8)+"px";frame.style.width=(box.w+16)+"px";frame.style.height=(box.h+16)+"px";
+  const valid=isPositionMoveValid([...positionSelection],dx,dy);
+  frame.classList.toggle("invalid",!valid);
+  frame.classList.toggle("valid",valid);
+}
+
 function applyTreeTransform(){
   const canvas=document.querySelector("#treeCanvas");
   if(canvas) canvas.style.transform=`translate(${drag.l}px,${drag.t}px) scale(${scale})`;
@@ -243,8 +308,8 @@ function renderTree(){
    * 6. Thứ tự anh/chị/em ưu tiên birthOrder, sau đó mới đến thứ tự trong dữ liệu.
    */
   const mobile=window.innerWidth<=700;
-  const NODE_W=mobile?150:180, NODE_H=mobile?74:88, COUPLE_GAP=mobile?24:42;
-  const GROUP_GAP=mobile?30:42, ROW_H=mobile?138:165, PAD=mobile?28:60, MIN_WIDTH=mobile?Math.max(360, (document.querySelector("#treeViewport")?.clientWidth||380)-20):900;
+  const NODE_W=mobile?128:160, NODE_H=mobile?66:78, COUPLE_GAP=mobile?14:24;
+  const GROUP_GAP=mobile?18:24, ROW_H=mobile?112:128, PAD=mobile?22:42, MIN_WIDTH=mobile?Math.max(320, (document.querySelector("#treeViewport")?.clientWidth||380)-12):760;
 
   const groups=[];
   const groupByPerson=new Map();
@@ -357,6 +422,13 @@ function renderTree(){
     if(g.ids.length===2){
       positions[g.ids[1]]={x:base+NODE_W+COUPLE_GAP,y};
     }
+    // Vị trí thủ công theo từng người có ưu tiên cao hơn vị trí của family unit.
+    g.ids.forEach(id=>{
+      const manual=manualPositions[`person:${id}`];
+      if(!manual)return;
+      if(Number.isFinite(Number(manual.x)))positions[id].x=Number(manual.x);
+      if(Number.isFinite(Number(manual.y)))positions[id].y=Number(manual.y);
+    });
   }
 
   // CĂN CẶP CHA/MẸ THEO ĐÚNG SIBSHIP BAR:
@@ -405,7 +477,7 @@ function renderTree(){
 
   const maxDepth=Math.max(0,...groups.map(g=>g.depth));
   const maxRight=Math.max(...Object.values(positions).map(p=>p.x+NODE_W));
-  const canvasWidth=Math.max(MIN_WIDTH,cursor+PAD,maxRight+PAD);
+  const canvasWidth=Math.max(MIN_WIDTH,maxRight+PAD);
   const canvasHeight=(maxDepth+1)*ROW_H+150;
   canvas.style.width=canvasWidth+"px";
   canvas.style.height=canvasHeight+"px";
@@ -483,51 +555,68 @@ function renderTree(){
     el.style.top=pos.y+"px";
     el.innerHTML=`<div class="avatar">${avatar(p)}</div><div><strong>${esc(p.nickname||p.name)}</strong><small>${esc(p.name)}${p.birth?` • ${p.birth}`:""}</small></div>`;
 
-    let downX=0,downY=0,startG=null,startX=0,moved=false;
+    let downX=0,downY=0,moved=false;
+    const clearHold=()=>{if(positionHoldTimer){clearTimeout(positionHoldTimer);positionHoldTimer=null}};
     el.addEventListener("pointerdown",e=>{
       if(!positionMode)return;
+      e.stopPropagation();
       downX=e.clientX;downY=e.clientY;moved=false;
-      startG=groupByPerson.get(p.id);startX=startG?startG.baseX:pos.x;
       el.setPointerCapture?.(e.pointerId);
+      const already=positionSelection.has(p.id);
+      if(already){
+        activePositionDrag={pointerId:e.pointerId,ids:[...positionSelection],startX:e.clientX,startY:e.clientY};
+        updateSelectionFrame();
+        return;
+      }
+      clearHold();
+      positionHoldTimer=setTimeout(()=>{
+        positionHoldTimer=null;
+        positionSelection.add(p.id);
+        selectedId=p.id;
+        renderPositionSelection();
+      },320);
     });
     el.addEventListener("pointermove",e=>{
-      if(!positionMode||!startG)return;
-      const dx=(e.clientX-downX)/scale;
-      if(Math.abs(dx)>5)moved=true;
-      el.style.transform=`translateX(${dx}px)`;
-      if(startG.ids.length===2){
-        const otherId=startG.ids.find(id=>id!==p.id);
-        const otherEl=canvas.querySelector?.(`[data-card-id="${otherId}"]`);
-        if(otherEl)otherEl.style.transform=`translateX(${dx}px)`;
+      if(!positionMode)return;
+      const dx=e.clientX-downX,dy=e.clientY-downY;
+      if(Math.abs(dx)>6||Math.abs(dy)>6){
+        moved=true;
+        if(positionHoldTimer){clearHold();}
       }
+      if(!activePositionDrag)return;
+      const sx=activePositionDrag.startX,sy=activePositionDrag.startY;
+      const mx=(e.clientX-sx)/scale,my=(e.clientY-sy)/scale;
+      activePositionDrag.dx=mx;activePositionDrag.dy=my;
+      const ids=activePositionDrag.ids;
+      ids.forEach(id=>{
+        const base=positions[id];
+        const card=canvas.querySelector(`[data-card-id="${id}"]`);
+        if(card)card.style.transform=`translate(${mx}px,${my}px)`;
+      });
+      updateSelectionFrame(mx,my);
     });
     el.addEventListener("pointerup",e=>{
-      if(!positionMode||!startG)return;
-      const dx=(e.clientX-downX)/scale;
-      el.style.transform="";
-      const g=startG;startG=null;
-      if(!moved){selectedId=p.id;renderAll(true);return;}
-
-      const proposed=startX+dx;
-      const ownW=g.ids.length===2?NODE_W*2+COUPLE_GAP:NODE_W;
-      let valid=Number.isFinite(proposed);
-      for(const other of groups){
-        if(other===g||other.depth!==g.depth)continue;
-        const ox=other.baseX;
-        const ow=other.ids.length===2?NODE_W*2+COUPLE_GAP:NODE_W;
-        if(proposed<ox+ow+20&&proposed+ownW>ox-20){valid=false;break;}
+      if(!positionMode)return;
+      clearHold();
+      if(!activePositionDrag){
+        if(!moved)renderPositionSelection();
+        return;
       }
+      const dragState=activePositionDrag;activePositionDrag=null;
+      const dx=Number(dragState.dx||0),dy=Number(dragState.dy||0);
+      const valid=isPositionMoveValid(dragState.ids,dx,dy);
       if(valid){
-        manualPositions[g.anchor]={x:proposed};
-      }else{
-        delete manualPositions[g.anchor];
+        dragState.ids.forEach(id=>{
+          const base=positions[id];
+          manualPositions[`person:${id}`]={x:Math.round(base.x+dx),y:Math.round(base.y+dy)};
+        });
+        safeStorageSet("family-tree-positions-v4",JSON.stringify(manualPositions));
       }
-      safeStorageSet("family-tree-positions-v3",JSON.stringify(manualPositions));
       renderTree();
     });
-    el.addEventListener("pointercancel",()=>{startG=null;el.style.transform="";renderTree()});
+    el.addEventListener("pointercancel",()=>{clearHold();activePositionDrag=null;renderTree()});
     el.addEventListener("click",e=>{
-      if(positionMode&&moved){e.stopPropagation();return;}
+      if(positionMode){e.stopPropagation();return;}
       selectedId=p.id;
       renderAll(true);
     });
@@ -792,8 +881,8 @@ $("#cancelKeyboard").onclick=closeKeyboardModal;
 $("#familyText").oninput=updateParsePreview;
 $("#buildFamilyBtn").onclick=()=>{const text=$("#familyText").value.trim();if(!text)return;const before=people.length;const result=parseFamilyText(text);const added=people.length-before;closeKeyboardModal();selectedId=people[people.length-1]?.id||selectedId;scale=window.innerWidth<=700?.78:1;drag={...drag,l:0,t:0};viewHasInteracted=false;renderAll();if(result.unresolved.length)alert(`Đã tạo ${added} người và nối ${result.links} quan hệ.\\n\\nCác câu máy chưa hiểu:\\n- ${result.unresolved.join("\\n- ")}\\n\\nBạn có thể viết lại theo mẫu “A là con của B và C”.`);else alert(`Đã tạo/thêm ${added} người và nối ${result.links} quan hệ.`)};
 
-$("#positionModeBtn").onclick=()=>{positionMode=!positionMode;$("#positionModeBtn").classList.toggle("position-mode",positionMode);$("#positionModeBtn").textContent=positionMode?"✓ Xong vị trí":"↔ Chỉnh vị trí";renderTree()};
-$("#resetBtn").onclick=()=>{if(confirm("Khôi phục dữ liệu mẫu?")){people=cloneSample();manualPositions={};safeStorageSet("family-tree-positions-v3","{}");save();selectedId="me";renderAll()}};
+$("#positionModeBtn").onclick=()=>{positionMode=!positionMode;clearTimeout(positionHoldTimer);activePositionDrag=null;positionSelection.clear();$("#positionModeBtn").classList.toggle("position-mode",positionMode);$("#positionModeBtn").textContent=positionMode?"✓ Xong vị trí":"↔ Chỉnh vị trí";renderTree()};
+$("#resetBtn").onclick=()=>{if(confirm("Khôi phục dữ liệu mẫu?")){people=cloneSample();manualPositions={};safeStorageSet("family-tree-positions-v4","{}");save();selectedId="me";renderAll()}};
 $("#zoomIn").onclick=()=>{viewHasInteracted=true;scale=Math.min(1.7,scale+.1);renderTree()};$("#zoomOut").onclick=()=>{viewHasInteracted=true;scale=Math.max(.5,scale-.1);renderTree()};$("#zoomReset").onclick=()=>{scale=window.innerWidth<=700?.78:1;drag={...drag,l:0,t:0};viewHasInteracted=false;renderTree()};
 $("#treeViewport").addEventListener("wheel",e=>{e.preventDefault();viewHasInteracted=true;scale=Math.max(.5,Math.min(1.7,scale+(e.deltaY<0?.08:-.08)));renderTree()},{passive:false});
 $("#treeViewport").addEventListener("pointerdown",e=>{
@@ -812,6 +901,6 @@ $("#treeViewport").addEventListener("pointerup",()=>{drag.on=false;drag.cardId="
 $("#treeViewport").addEventListener("pointercancel",()=>{drag.on=false;drag.cardId=""});
 document.addEventListener("click",e=>{const row=e.target.closest("[data-person]");if(row){selectedId=row.dataset.person;renderAll()}});
 try{renderAll()}catch(err){
-  console.error(err);people=cloneSample();manualPositions={};safeStorageSet(KEY,JSON.stringify(people));safeStorageSet("family-tree-positions-v3","{}");selectedId="me";
+  console.error(err);people=cloneSample();manualPositions={};safeStorageSet(KEY,JSON.stringify(people));safeStorageSet("family-tree-positions-v4","{}");selectedId="me";
   try{renderAll()}catch(err2){console.error(err2)}
 }

@@ -101,3 +101,45 @@
   .modal-card{padding:14px;border-radius:14px;max-height:94vh}
   .modal-head h2{font-size:18px}
 }
+
+
+/* Final compact family-tree pass */
+.family-connectors line{vector-effect:non-scaling-stroke}
+@media (min-width:701px){
+  .tree-card{width:160px;min-height:78px;height:78px;padding:8px;border-radius:14px;gap:8px}
+  .tree-card .avatar{width:42px;height:42px;border-radius:11px;font-size:19px}
+  .tree-card strong{font-size:12px}.tree-card small{font-size:9px}
+}
+@media (max-width:700px){
+  .tree-card{width:128px;min-height:66px;height:66px;padding:7px;border-radius:12px;gap:6px}
+  .tree-card .avatar{width:34px;height:34px;border-radius:9px;font-size:17px}
+  .tree-card strong{font-size:10px}.tree-card small{font-size:7px}
+}
+
+/* ===== Chỉnh vị trí đa mục tiêu ===== */
+.tree-card.position-selected{
+  border-color:#2dbb72!important;
+  box-shadow:0 0 0 3px rgba(45,187,114,.18),0 10px 28px rgba(50,60,90,.12)!important;
+}
+.position-selection-frame{
+  position:absolute;
+  z-index:5;
+  pointer-events:none;
+  border:2px solid #2dbb72;
+  border-radius:12px;
+  background:rgba(45,187,114,.06);
+  box-shadow:0 0 0 2px rgba(255,255,255,.7) inset;
+  transition:border-color .08s ease,background .08s ease,box-shadow .08s ease;
+}
+.position-selection-frame.invalid{
+  border-color:#e34b5f;
+  background:rgba(227,75,95,.07);
+  box-shadow:0 0 0 2px rgba(255,255,255,.7) inset;
+}
+.position-selection-frame.valid{
+  border-color:#2dbb72;
+}
+.position-mode + *{}
+@media(max-width:700px){
+  .position-selection-frame{border-width:2px;border-radius:10px}
+}
