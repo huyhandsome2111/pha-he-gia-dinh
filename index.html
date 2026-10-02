@@ -46,7 +46,7 @@
       <section class="panel relation-panel">
         <div class="panel-head">
           <div>
-            <h2>🔎 Xưng hô</h2>
+            <div class="relation-title-row"><h2>🔎 Xưng hô</h2><button type="button" id="quickAddRelationBtn" class="quick-add-inline">＋ Thêm nhanh</button></div>
             <span>Bấm một người trên cây để tự hiện cách xưng hô.</span>
           </div>
         </div>
@@ -55,7 +55,7 @@
         <label>Đối tượng</label>
         <select id="targetPerson"></select>
         <button id="calculateBtn" class="primary full">Tính cách xưng hô</button>
-        <div class="muted relation-help">Nếu bạn tự đổi hai ô trên, hãy bấm nút này để tính lại.</div>
+        <div class="muted relation-help">Bấm người trên cây sẽ tự tính. Bạn cũng có thể đổi hai ô để tính trường hợp khác.</div>
         <div id="relationResult"></div>
       </section>
 
@@ -187,6 +187,6 @@ Tôi là con của Ba và Mẹ"></textarea>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
-<script src="app.js?v=21"></script>
+<script src="app.js?v=22"></script>
 </body>
 </html>

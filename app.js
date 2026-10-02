@@ -483,14 +483,22 @@ function renderTree(){
   groups.forEach(sortChildren);
 
   const roots=groups.filter(g=>!g.parent);
+  // Gia đình càng đông anh/chị/em thì khoảng cách giữa các family unit càng co lại,
+  // nhưng vẫn giữ khoảng an toàn để card không chồng lên nhau.
+  const siblingGap=g=>{
+    const n=g.children.length;
+    if(n<=2)return GROUP_GAP;
+    return Math.max(mobile?8:10, GROUP_GAP-Math.min(5,n-2)*(mobile?2:3));
+  };
   const widthMemo=new Map();
   const calcWidth=(g,stack=new Set())=>{
     if(widthMemo.has(g))return widthMemo.get(g);
     if(stack.has(g))return NODE_W;
     stack.add(g);
     const ownW=g.ids.length===2?NODE_W*2+COUPLE_GAP:NODE_W;
+    const gap=siblingGap(g);
     const kidsW=g.children.length
-      ?g.children.reduce((sum,c)=>sum+calcWidth(c.group,stack),0)+(g.children.length-1)*GROUP_GAP
+      ?g.children.reduce((sum,c)=>sum+calcWidth(c.group,stack),0)+(g.children.length-1)*gap
       :0;
     stack.delete(g);
     const w=Math.max(ownW,kidsW);
@@ -509,11 +517,12 @@ function renderTree(){
     const ownW=g.ids.length===2?NODE_W*2+COUPLE_GAP:NODE_W;
     g.ownX=x+(g.w-ownW)/2;
     if(g.children.length){
-      const total=g.children.reduce((sum,c)=>sum+calcWidth(c.group),0)+(g.children.length-1)*GROUP_GAP;
+      const gap=siblingGap(g);
+      const total=g.children.reduce((sum,c)=>sum+calcWidth(c.group),0)+(g.children.length-1)*gap;
       let cx=x+(g.w-total)/2;
       for(const c of g.children){
         place(c.group,cx,depth+1);
-        cx+=calcWidth(c.group)+GROUP_GAP;
+        cx+=calcWidth(c.group)+gap;
       }
     }
   };
@@ -521,7 +530,7 @@ function renderTree(){
   let cursor=PAD;
   roots.forEach(r=>{
     place(r,cursor,0);
-    cursor+=calcWidth(r)+GROUP_GAP*1.5;
+    cursor+=calcWidth(r)+Math.max(GROUP_GAP*1.6, mobile?26:38);
   });
   groups.forEach(g=>{
     if(!placed.has(g)){
@@ -566,11 +575,22 @@ function renderTree(){
   };
   const shiftGroup=(g,dx)=>{
     if(!Number.isFinite(dx)||Math.abs(dx)<0.01)return;
-    // Khi người dùng đã tự đặt vị trí, không để thuật toán căn giữa
-    // kéo họ trở lại sau khi thả chuột.
-    if(g.ids.some(id=>manualPositions[`person:${id}`]))return;
-    g.baseX+=dx;
-    for(const id of g.ids)positions[id].x+=dx;
+    const manualIds=g.ids.filter(id=>manualPositions[`person:${id}`]);
+    if(manualIds.length===0){
+      g.baseX+=dx;
+      for(const id of g.ids)positions[id].x+=dx;
+      return;
+    }
+    // Nếu chỉ một người trong cặp đã chỉnh tay, giữ người đó cố định và
+    // đặt người còn lại cạnh họ; không tạo bản sao Ba/Mẹ ở nhánh kia.
+    if(manualIds.length===1 && g.ids.length===2){
+      const fixed=manualIds[0], other=g.ids.find(id=>id!==fixed);
+      if(other){
+        const fp=positions[fixed];
+        const fixedIndex=g.ids.indexOf(fixed);
+        positions[other].x=fixedIndex===0 ? fp.x+NODE_W+COUPLE_GAP : fp.x-NODE_W-COUPLE_GAP;
+      }
+    }
   };
   // Làm từ thế hệ thấp lên để mỗi cặp cha/mẹ nằm đúng trên TÂM của nhóm con.
   // Quan trọng: chỉ lấy vị trí của người con (childId), KHÔNG lấy vợ/chồng
@@ -863,8 +883,10 @@ $("#addPersonBtn").onclick=()=>{if(selectedId&&get(selectedId))openRelationModal
 $("#personForm").onsubmit=e=>{e.preventDefault();const id=$("#personId").value||crypto.randomUUID();let old=get(id);const p={id,name:$("#name").value.trim(),nickname:$("#nickname").value.trim(),gender:$("#gender").value,birth:Number($("#birth").value)||"",job:$("#job").value.trim(),hometown:$("#hometown").value.trim(),father:$("#father").value,mother:$("#mother").value,spouse:$("#spouse").value,birthOrder:Number($("#birthOrder").value)||"",notes:$("#notes").value.trim(),photo:modalPhoto||old?.photo||""};if(!p.name)return;if(old)Object.assign(old,p);else people.push(p);if(p.spouse){const s=get(p.spouse);if(s)s.spouse=p.id}save();selectedId=id;closeModal();renderAll()};
 $("#deletePersonBtn").onclick=()=>{const id=$("#personId").value;if(!id)return;if(!confirm("Xóa người này?"))return;people=people.filter(p=>p.id!==id);people.forEach(p=>{if(p.father===id)p.father="";if(p.mother===id)p.mother="";if(p.spouse===id)p.spouse=""});delete manualPositions[`person:${id}`];positionSelection.delete(id);selectedId=people[0]?.id||"";save();closeModal();renderAll()};
 $("#photo").onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{$("#avatarPreview").innerHTML=`<img src="${r.result}">`;const id=$("#personId").value;if(id){get(id).photo=r.result;save()}};r.readAsDataURL(f)};
-$("#mainPerson").onchange=e=>{selectedId=e.target.value;renderTree();renderProfile()};
-$("#calculateBtn").onclick=()=>{const a=$("#mainPerson").value,b=$("#targetPerson").value,r=relationship(a,b),names=r.path.map(get);$("#relationResult").innerHTML=`<div class="relation-path"><div class="path-title">Đường quan hệ</div><div class="path">${names.map((p,i)=>`<span>${esc(p.nickname||p.name)}</span>${i<names.length-1?"→":""}`).join("")}</div></div><div class="answer"><small>${esc(get(a)?.nickname||get(a)?.name)} gọi ${esc(get(b)?.nickname||get(b)?.name)} là</small><strong>${esc(r.title)}</strong></div>`};
+$("#mainPerson").onchange=e=>{selectedId=e.target.value;renderTree();renderProfile();renderAutoRelation()};
+$("#targetPerson").onchange=()=>renderAutoRelation();
+$("#calculateBtn").onclick=()=>renderAutoRelation();
+$("#quickAddRelationBtn").onclick=()=>{if(selectedId&&get(selectedId))openRelationModal(selectedId);else alert("Hãy chọn một người trên sơ đồ trước.")};
 $("#closeRelationModal").onclick=closeRelationModal;
 $("#cancelRelation").onclick=closeRelationModal;
 const quickRoleLabels={child:"Con",father:"Cha / Ba",mother:"Mẹ",spouse:"Vợ / Chồng",sibling:"Anh / Chị / Em"};

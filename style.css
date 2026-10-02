@@ -195,3 +195,10 @@
 }
 .tree-tools .icon-tool:hover{filter:brightness(.97)}
 .profile-actions .primary.full{margin-bottom:8px}
+
+/* Xưng hô: nút thêm nhanh cạnh tiêu đề */
+.relation-title-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.relation-title-row h2{margin:0!important}
+.quick-add-inline{border:0;border-radius:9px;background:#f0edff;color:#5a4be7;padding:6px 9px;font-size:11px;font-weight:800;white-space:nowrap}
+.quick-add-inline:hover{filter:brightness(.97)}
+@media(max-width:700px){.quick-add-inline{font-size:10px;padding:6px 8px}}
