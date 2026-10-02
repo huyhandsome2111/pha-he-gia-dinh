@@ -357,6 +357,36 @@ function renderTree(){
     }
   }
 
+  // CĂN CẶP CHA/MẸ THEO ĐÚNG SIBSHIP BAR:
+  // Người phối ngẫu của một đứa con KHÔNG được làm lệch tâm của
+  // thế hệ cha mẹ. Chỉ tâm của các "người con" (childId) mới quyết định
+  // vị trí thanh anh/chị/em và trung điểm nối từ cặp cha mẹ xuống.
+  // Ví dụ: Ông nội─Bà nội và Chú─Thím là hai cặp con; thanh anh em
+  // chỉ nối tâm Ông nội ↔ tâm Chú, không tính Bà nội/Thím vào hai đầu.
+  // Sau khi các con đã được đặt, dịch cả family unit của cha mẹ để
+  // trung điểm cặp cha mẹ trùng với trung điểm nhóm con.
+  const centerOfGroup=g=>{
+    const entries=g.children.filter(c=>positions[c.childId]);
+    if(!entries.length)return null;
+    const xs=entries.map(c=>positions[c.childId].x+NODE_W/2);
+    return (Math.min(...xs)+Math.max(...xs))/2;
+  };
+  const shiftGroup=(g,dx)=>{
+    if(!Number.isFinite(dx)||Math.abs(dx)<0.01)return;
+    g.baseX+=dx;
+    for(const id of g.ids)positions[id].x+=dx;
+  };
+  // Làm từ thế hệ thấp lên để mỗi cặp được căn theo chính các con của nó.
+  [...groups].sort((a,b)=>b.depth-a.depth).forEach(g=>{
+    if(!g.children.length)return;
+    const childCenter=centerOfGroup(g);
+    if(childCenter==null)return;
+    const ownCenter=g.ids.length===2
+      ?(positions[g.ids[0]].x+NODE_W/2+positions[g.ids[1]].x+NODE_W/2)/2
+      :positions[g.ids[0]].x+NODE_W/2;
+    shiftGroup(g,childCenter-ownCenter);
+  });
+
   const maxDepth=Math.max(0,...groups.map(g=>g.depth));
   const canvasWidth=Math.max(MIN_WIDTH,cursor+PAD);
   const canvasHeight=(maxDepth+1)*ROW_H+150;
