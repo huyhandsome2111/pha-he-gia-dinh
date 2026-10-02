@@ -251,7 +251,7 @@ function renderTree(){
     const w=Math.max(own,childWidth);
     widthMemo.set(g,w); return w;
   };
-  roots.forEach(calcWidth);
+  roots.forEach(r=>calcWidth(r));
 
   // Căn các cụm theo thế hệ. Mỗi cụm con nằm giữa tâm của cụm cha mẹ.
   let cursor=PAD;
