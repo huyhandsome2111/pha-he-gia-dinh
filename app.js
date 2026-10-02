@@ -15,7 +15,14 @@ let people=load(), selectedId="me", scale=1, drag={on:false,x:0,y:0,l:0,t:0};
 let manualPositions=JSON.parse(localStorage.getItem("family-tree-positions-v1")||"{}");
 let modalPhoto="";
 
-function load(){try{return JSON.parse(localStorage.getItem(KEY))||sample}catch{return sample}}
+function load(){
+  try{
+    const raw=localStorage.getItem(KEY);
+    if(!raw)return sample;
+    const data=JSON.parse(raw);
+    return Array.isArray(data)&&data.length?data:sample;
+  }catch{return sample}
+}
 function save(){localStorage.setItem(KEY,JSON.stringify(people))}
 const $=s=>document.querySelector(s);
 function get(id){return people.find(p=>p.id===id)}
