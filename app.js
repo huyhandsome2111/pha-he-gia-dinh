@@ -279,7 +279,7 @@ function renderTree(){
     const l=document.createElementNS("http://www.w3.org/2000/svg","line");
     l.setAttribute("x1",x1); l.setAttribute("y1",y1);
     l.setAttribute("x2",x2); l.setAttribute("y2",y2);
-    l.setAttribute("class",cls); svg.appendChild(l);
+    l.setAttribute("class",cls); l.setAttribute("vector-effect","non-scaling-stroke"); svg.appendChild(l);
   };
 
   const center=p=>({x:p.x+NODE_W/2,y:p.y+NODE_H/2});

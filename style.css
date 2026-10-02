@@ -16,7 +16,6 @@
 .profile-actions .full{margin-top:0}
 
 /* Kiểu sơ đồ phả hệ sinh học */
-.tree-canvas{transform-origin:0 0}
 .pedigree-lines{position:absolute;left:0;top:0;overflow:visible;z-index:0;pointer-events:none}
 .pedigree-lines line{stroke:#4d5562;stroke-width:2;fill:none}
 .pedigree-marriage{stroke-width:2.5!important}
@@ -28,3 +27,11 @@
 .pedigree-person.selected .pedigree-symbol{border-color:#6657e8;box-shadow:0 0 0 4px #e9e6ff}
 .pedigree-label{font-size:10px;line-height:1.2;margin-top:5px;white-space:nowrap;max-width:110px;overflow:hidden;text-overflow:ellipsis;transform:translateX(-28px);width:110px;color:#303743}
 @media(max-width:700px){.pedigree-person{width:48px;height:68px}.pedigree-symbol{width:48px;height:48px}.pedigree-label{font-size:9px}}
+
+/* Thanh nối phả hệ: SVG nằm dưới các khung người nhưng luôn phủ đúng toàn bộ canvas. */
+.tree-canvas{position:absolute;left:0;top:0;transform-origin:0 0}
+.family-connectors{position:absolute;left:0;top:0;display:block;overflow:visible;z-index:1;pointer-events:none}
+.family-connectors line{stroke:#7f8794;stroke-width:2.5;fill:none;shape-rendering:geometricPrecision}
+.family-connectors .connector-spouse{stroke:#6657e8;stroke-width:3}
+.family-connectors .connector-parent,.family-connectors .connector-siblings{stroke:#7f8794;stroke-width:2.5}
+.tree-card{z-index:2}
