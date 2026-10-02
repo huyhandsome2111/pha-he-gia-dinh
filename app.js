@@ -48,7 +48,7 @@ function sanitizePeople(data){
   return out;
 }
 function load(){const raw=safeStorageGet(KEY);if(!raw)return cloneSample();try{return sanitizePeople(JSON.parse(raw))}catch{return cloneSample()}}
-let cloud={ready:false,user:null,db:null,saveTimer:null};
+let cloud={ready:false,user:null,db:null,saveTimer:null,remoteRef:null,remoteApplying:false};
 function firebaseConfigured(){
   const c=window.FIREBASE_CONFIG||{};
   return c.apiKey && !String(c.apiKey).startsWith("YOUR_") && c.projectId && !String(c.projectId).startsWith("YOUR_");
@@ -58,47 +58,67 @@ function setSyncStatus(text){
   if(!el){el=document.createElement("span");el.id="syncStatus";el.className="sync-status";document.querySelector(".top-actions")?.appendChild(el)}
   el.textContent=text||"";
 }
+function localSnapshot(){return {people,manualPositions,updatedAt:firebase.database.ServerValue.TIMESTAMP}};
 function save(){
   safeStorageSet(KEY,JSON.stringify(people));
-  if(cloud.ready&&cloud.db&&cloud.user){
+  safeStorageSet("family-tree-positions-v4",JSON.stringify(manualPositions));
+  if(cloud.ready&&cloud.db&&cloud.user&&!cloud.remoteApplying){
     clearTimeout(cloud.saveTimer);
     setSyncStatus("Đang lưu…");
     cloud.saveTimer=setTimeout(async()=>{
       try{
-        await cloud.db.collection("users").doc(cloud.user.uid).set({people,manualPositions,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+        await cloud.db.ref(`users/${cloud.user.uid}`).update(localSnapshot());
         setSyncStatus("Đã đồng bộ");
       }catch(err){console.error(err);setSyncStatus("Lỗi đồng bộ")}
-    },500);
+    },350);
   }
+}
+function applyCloudData(data){
+  if(!data||typeof data!=="object")return;
+  cloud.remoteApplying=true;
+  try{
+    if(Array.isArray(data.people))people=sanitizePeople(data.people);
+    if(data.manualPositions&&typeof data.manualPositions==="object")manualPositions=data.manualPositions;
+    safeStorageSet(KEY,JSON.stringify(people));
+    safeStorageSet("family-tree-positions-v4",JSON.stringify(manualPositions));
+    if(!get(selectedId))selectedId=people.find(p=>p.id==="me")?.id||people[0]?.id||"";
+    renderAll();
+  }finally{cloud.remoteApplying=false}
 }
 async function initGoogleSync(){
   if(!firebaseConfigured()){setSyncStatus("Chưa cấu hình Google");return;}
   try{
     if(!firebase.apps.length)firebase.initializeApp(window.FIREBASE_CONFIG);
-    cloud.db=firebase.firestore();
+    cloud.db=firebase.database();
     firebase.auth().onAuthStateChanged(async user=>{
       cloud.user=user||null;
-      if(!user){cloud.ready=false;setSyncStatus("Chưa đăng nhập");updateGoogleButton();return;}
+      cloud.ready=false;
+      if(cloud.remoteRef){try{cloud.remoteRef.off()}catch{} cloud.remoteRef=null;}
+      if(!user){setSyncStatus("Chưa đăng nhập");updateGoogleButton();return;}
       setSyncStatus("Đang đồng bộ…");
       try{
-        const ref=cloud.db.collection("users").doc(user.uid);
-        const snap=await ref.get();
-        if(snap.exists&&Array.isArray(snap.data().people)){
-          people=sanitizePeople(snap.data().people);
-          manualPositions=snap.data().manualPositions&&typeof snap.data().manualPositions==="object"?snap.data().manualPositions:{};
-          safeStorageSet(KEY,JSON.stringify(people));
-          safeStorageSet("family-tree-positions-v4",JSON.stringify(manualPositions));
-          selectedId=get(selectedId)?selectedId:(people.find(p=>p.id==="me")?.id||people[0]?.id||"");
-          renderAll();
+        const ref=cloud.db.ref(`users/${user.uid}`);
+        cloud.remoteRef=ref;
+        const snap=await ref.once("value");
+        const data=snap.val();
+        if(data&&Array.isArray(data.people)){
+          applyCloudData(data);
         }else{
-          await ref.set({people,manualPositions,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+          await ref.update(localSnapshot());
         }
+        ref.on("value",snap2=>{
+          if(!snap2.exists()||cloud.remoteApplying)return;
+          const incoming=snap2.val();
+          // Firebase sends our own write back too; applying it is harmless and keeps both devices aligned.
+          applyCloudData(incoming);
+          setSyncStatus("Đã đồng bộ");
+        },err=>{console.error(err);setSyncStatus("Lỗi đồng bộ")});
         cloud.ready=true;
         setSyncStatus(`✓ ${user.displayName||user.email||"Google"}`);
-      }catch(err){console.error(err);setSyncStatus("Lỗi đồng bộ")}
+      }catch(err){console.error(err);setSyncStatus("Lỗi đồng bộ: "+(err.message||"không xác định"))}
       updateGoogleButton();
     });
-  }catch(err){console.error(err);setSyncStatus("Không khởi tạo được Google")}
+  }catch(err){console.error(err);setSyncStatus("Không khởi tạo được Firebase")}
 }
 function updateGoogleButton(){
   const btn=document.querySelector("#googleBtn");
