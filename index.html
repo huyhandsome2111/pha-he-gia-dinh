@@ -29,12 +29,15 @@
           <h2>Sơ đồ phả hệ</h2>
           <span id="treeHint">Kéo nền để di chuyển • cuộn để phóng to • Chỉnh vị trí để sắp xếp người</span>
         </div>
-        <div class="tree-tools">
-          <button id="zoomOut">−</button>
-          <button id="zoomReset">100%</button>
-          <button id="zoomIn">＋</button>
-          <button id="deleteSelectedBtn" class="danger icon-tool" title="Xóa người đã chọn">🗑️</button>
-          <button id="positionModeBtn">↔ Chỉnh vị trí</button>
+        <div class="tree-tool-wrap">
+          <button id="treeToolsToggle" class="tool-toggle" aria-expanded="false" title="Công cụ sơ đồ">⚙</button>
+          <div id="treeTools" class="tree-tools">
+            <button id="zoomOut">−</button>
+            <button id="zoomReset">100%</button>
+            <button id="zoomIn">＋</button>
+            <button id="deleteSelectedBtn" class="danger icon-tool" title="Xóa người đã chọn">🗑️</button>
+            <button id="positionModeBtn">↔ Chỉnh vị trí</button>
+          </div>
         </div>
       </div>
       <div id="treeViewport" class="tree-viewport">

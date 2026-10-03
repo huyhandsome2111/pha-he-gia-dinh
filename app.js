@@ -13,7 +13,7 @@ const sample=[
 {id:"ggp",name:"Cụ ông nội",nickname:"Cụ ông",gender:"male",birth:1925,job:"",hometown:"",father:"",mother:"",spouse:"ggm",birthOrder:1,notes:""},
 {id:"ggm",name:"Cụ bà nội",nickname:"Cụ bà",gender:"female",birth:1928,job:"",hometown:"",father:"",mother:"",spouse:"ggp",birthOrder:1,notes:""}
 ];
-let people=load(), selectedId="me", relationMainId="me", relationTargetId="me", scale=window.innerWidth<=700?.78:1, drag={on:false,x:0,y:0,l:0,t:0};
+let people=load(), selectedId="", relationMainId="me", relationTargetId="me", scale=window.innerWidth<=700?.78:1, drag={on:false,x:0,y:0,l:0,t:0};
 let viewHasInteracted=false;
 let modalPhoto="";
 let positionMode=false;
@@ -81,7 +81,7 @@ function applyCloudData(data){
     if(data.manualPositions&&typeof data.manualPositions==="object")manualPositions=data.manualPositions;
     safeStorageSet(KEY,JSON.stringify(people));
     safeStorageSet("family-tree-positions-v4",JSON.stringify(manualPositions));
-    if(!get(selectedId))selectedId=people.find(p=>p.id==="me")?.id||people[0]?.id||"";
+    if(selectedId&&!get(selectedId))selectedId="";
     renderAll();
   }finally{cloud.remoteApplying=false}
 }
@@ -572,7 +572,7 @@ function renderTree(){
   canvas.innerHTML="";
   people=sanitizePeople(people);
   if(!people.length){people=cloneSample();save();}
-  if(!get(selectedId))selectedId=people.find(p=>p.id==="me")?.id||people[0]?.id||"";
+  if(selectedId&&!get(selectedId))selectedId="";
 
   /*
    * LAYOUT PHẢ HỆ — phiên bản nhiều-cha/mẹ, nhưng mỗi người chỉ xuất hiện 1 lần.
@@ -621,6 +621,12 @@ function renderTree(){
     parentGroup.children.push({group:childGroup,childId});
     childGroup.parents.add(parentGroup);
   };
+
+  // Người chính để định hướng hai nhánh họ hàng vào nhau.
+  const mePerson=people.find(p=>normalizeText(p.nickname||"")==="toi"||normalizeText(p.name||"")==="toi")||get("me");
+  const focusMotherId=mePerson?.mother||"";
+  const focusFatherId=mePerson?.father||"";
+  const focusCoupleGroup=(focusMotherId&&focusFatherId)?groupByPerson.get(focusMotherId):null;
 
   // Gắn quan hệ cha/mẹ theo TỪNG CÁ NHÂN. Đây là phần quan trọng giúp Ba/Mẹ
   // cùng tồn tại trong một cặp nhưng vẫn giữ được hai nhánh nội/ngoại riêng.
@@ -685,6 +691,48 @@ function renderTree(){
     g.ownX=x;
     if(g.ids.length===2)positions[g.ids[1]]={x:x+NODE_W+gap,y};
   };
+
+  function inwardBloodBranch(seedId){
+    // Chỉ lấy họ hàng huyết thống: đi lên qua cha/mẹ và gom các con của tổ tiên,
+    // tuyệt đối không đi qua cạnh vợ/chồng để hai nhà Nội/Ngoại không nhập làm một.
+    const ids=new Set();
+    let frontier=[seedId];
+    const ancestorSeen=new Set();
+    for(let depth=0;depth<12 && frontier.length;depth++){
+      const next=[];
+      frontier.forEach(id=>{
+        if(!id||ancestorSeen.has(id))return;
+        ancestorSeen.add(id);ids.add(id);
+        const p=get(id);
+        if(!p)return;
+        [p.father,p.mother].filter(Boolean).forEach(pid=>{
+          if(!ancestorSeen.has(pid))next.push(pid);
+        });
+      });
+      frontier=next;
+    }
+    // Với mọi tổ tiên đã tìm được, thêm tất cả con của họ (anh/chị/em cùng nhánh).
+    for(const anc of [...ancestorSeen]) childrenOf(anc).forEach(c=>ids.add(c.id));
+    return ids;
+  }
+
+  function alignInwardBranches(){
+    if(!focusMotherId||!focusFatherId||focusMotherId===focusFatherId)return;
+    const motherPos=positions[focusMotherId],fatherPos=positions[focusFatherId];
+    if(!motherPos||!fatherPos)return;
+    const maternalIds=inwardBloodBranch(focusMotherId);
+    const paternalIds=inwardBloodBranch(focusFatherId);
+    const mCenter=motherPos.x+NODE_W/2, fCenter=fatherPos.x+NODE_W/2;
+    const currentMid=(mCenter+fCenter)/2;
+    // Ba/Mẹ sát nhau ở giữa; khoảng hở nhỏ nhưng có thêm chút đệm khi hai nhà rất đông.
+    const maternalCount=Math.max(0,maternalIds.size-1), paternalCount=Math.max(0,paternalIds.size-1);
+    const coupleGap=Math.min(70, Math.max(COUPLE_GAP, 18+Math.min(40,(maternalCount+paternalCount)*1.5)));
+    const desiredM=currentMid-(NODE_W+coupleGap)/2;
+    const desiredF=currentMid+(NODE_W+coupleGap)/2;
+    const dm=desiredM-mCenter, df=desiredF-fCenter;
+    maternalIds.forEach(id=>{if(positions[id])positions[id].x+=dm});
+    paternalIds.forEach(id=>{if(positions[id])positions[id].x+=df});
+  }
   for(const g of roots)setGroupPositions(g,g.ownX,45+g.depth*ROW_H);
 
   const personCenter=id=>positions[id]?positions[id].x+NODE_W/2:null;
@@ -697,6 +745,12 @@ function renderTree(){
   function makeParentTargets(pg){
     const out=new Map();
     const children=pg.children.slice().sort((a,b)=>{
+      // Với cặp Ba–Mẹ: Mẹ là người con hướng vào giữa của nhánh Ngoại,
+      // Ba là người con hướng vào giữa của nhánh Nội.
+      if(focusMotherId&&a.childId===focusMotherId && b.childId!==focusMotherId) return 1;
+      if(focusMotherId&&b.childId===focusMotherId && a.childId!==focusMotherId) return -1;
+      if(focusFatherId&&a.childId===focusFatherId && b.childId!==focusFatherId) return -1;
+      if(focusFatherId&&b.childId===focusFatherId && a.childId!==focusFatherId) return 1;
       const ao=Number(get(a.childId)?.birthOrder)||Number.MAX_SAFE_INTEGER;
       const bo=Number(get(b.childId)?.birthOrder)||Number.MAX_SAFE_INTEGER;
       if(ao!==bo)return ao-bo;
@@ -805,6 +859,9 @@ function renderTree(){
       if(Number.isFinite(Number(manual.y)))positions[id].y=Number(manual.y);
     }
   }
+
+  // Hai nhà Nội/Ngoại hướng vào nhau quanh cặp Mẹ–Ba trước khi ép connector thẳng.
+  alignInwardBranches();
 
   // Sau khi áp dụng vị trí thủ công, vẫn phải giữ luật đường thẳng của phả hệ.
   enforcePedigreeStraight(groups,positions,NODE_W,NODE_H,80);
@@ -1203,7 +1260,7 @@ $("#buildFamilyBtn").onclick=()=>{const text=$("#familyText").value.trim();if(!t
 
 $("#googleBtn").onclick=()=>cloud.user?googleLogout():googleLogin();
 $("#positionModeBtn").onclick=()=>{positionMode=!positionMode;clearTimeout(positionHoldTimer);activePositionDrag=null;positionSelection.clear();$("#positionModeBtn").classList.toggle("position-mode",positionMode);$("#positionModeBtn").textContent=positionMode?"✓ Xong vị trí":"↔ Chỉnh vị trí";renderTree();};
-$("#resetBtn").onclick=()=>{if(confirm("Khôi phục dữ liệu mẫu?")){people=cloneSample();manualPositions={};safeStorageSet("family-tree-positions-v4","{}");save();selectedId="me";renderAll()}};
+$("#resetBtn").onclick=()=>{if(confirm("Khôi phục dữ liệu mẫu?")){people=cloneSample();manualPositions={};safeStorageSet("family-tree-positions-v4","{}");save();selectedId="";renderAll()}};
 $("#deleteSelectedBtn").onclick=()=>{
   const ids=positionMode&&positionSelection.size?[...positionSelection]:(selectedId?[selectedId]:[]);
   if(!ids.length)return;
@@ -1222,6 +1279,10 @@ $("#deleteSelectedBtn").onclick=()=>{
   save();
   renderAll();
 };
+const treeToolsToggle=$("#treeToolsToggle"),treeTools=$("#treeTools");
+if(treeToolsToggle&&treeTools){
+  treeToolsToggle.onclick=()=>{const open=treeTools.classList.toggle("open");treeToolsToggle.setAttribute("aria-expanded",String(open));treeToolsToggle.textContent=open?"×":"⚙";};
+}
 $("#zoomIn").onclick=()=>{viewHasInteracted=true;scale=Math.min(1.7,scale+.1);renderTree()};$("#zoomOut").onclick=()=>{viewHasInteracted=true;scale=Math.max(.5,scale-.1);renderTree()};$("#zoomReset").onclick=()=>{scale=window.innerWidth<=700?.78:1;drag={...drag,l:0,t:0};viewHasInteracted=false;renderTree()};
 $("#treeViewport").addEventListener("wheel",e=>{e.preventDefault();viewHasInteracted=true;scale=Math.max(.5,Math.min(1.7,scale+(e.deltaY<0?.08:-.08)));renderTree()},{passive:false});
 $("#treeViewport").addEventListener("pointerdown",e=>{
@@ -1238,10 +1299,18 @@ $("#treeViewport").addEventListener("pointermove",e=>{
 });
 $("#treeViewport").addEventListener("pointerup",()=>{drag.on=false;drag.cardId=""});
 $("#treeViewport").addEventListener("pointercancel",()=>{drag.on=false;drag.cardId=""});
+$("#treeViewport").addEventListener("click",e=>{
+  if(positionMode)return;
+  if(drag.moved)return;
+  if(e.target.closest(".tree-card"))return;
+  selectedId="";
+  renderAll();
+});
 document.addEventListener("click",e=>{const row=e.target.closest("[data-person]");if(row){selectedId=row.dataset.person;renderAll()}});
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&selectedId&&!$(".modal:not(.hidden)")){selectedId="";renderAll()}});
 relationMainId=get("me")?.id||people[0]?.id||""; relationTargetId=selectedId||relationMainId;
 initGoogleSync();
 try{renderAll(true)}catch(err){
-  console.error(err);people=cloneSample();manualPositions={};safeStorageSet(KEY,JSON.stringify(people));safeStorageSet("family-tree-positions-v4","{}");selectedId="me";
+  console.error(err);people=cloneSample();manualPositions={};safeStorageSet(KEY,JSON.stringify(people));safeStorageSet("family-tree-positions-v4","{}");selectedId="";
   try{renderAll()}catch(err2){console.error(err2)}
 }

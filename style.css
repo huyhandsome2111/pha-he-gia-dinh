@@ -202,3 +202,58 @@
 .quick-add-inline{border:0;border-radius:9px;background:#f0edff;color:#5a4be7;padding:6px 9px;font-size:11px;font-weight:800;white-space:nowrap}
 .quick-add-inline:hover{filter:brightness(.97)}
 @media(max-width:700px){.quick-add-inline{font-size:10px;padding:6px 8px}}
+
+/* ===== Focus mode: sơ đồ là khu vực chính ===== */
+.topbar{height:78px;padding:12px 24px}
+.topbar h1{font-size:21px}
+.topbar p{font-size:11px}
+.top-actions{gap:7px}
+.top-actions button{padding:8px 11px;font-size:12px;border-radius:9px}
+.layout{display:block;height:calc(100vh - 78px);padding:12px}
+.tree-panel{height:100%;width:100%}
+.panel-head{padding:12px 14px}
+.panel-head h2{font-size:15px}
+.panel-head span{font-size:11px}
+.tree-tool-wrap{display:flex;align-items:center;gap:6px;position:relative}
+.tool-toggle{width:38px;height:38px;border:0;border-radius:10px;background:#f1f3f7;color:#3b4350;font-size:18px;font-weight:700}
+.tool-toggle:hover{filter:brightness(.98)}
+.tree-tools{display:none;align-items:center;gap:5px;background:#fff;padding:4px;border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 24px rgba(30,40,60,.08)}
+.tree-tools.open{display:flex}
+.tree-tools button{min-height:34px;padding:7px 10px}
+.side{position:fixed;right:18px;top:90px;bottom:18px;width:min(390px,calc(100vw - 36px));z-index:12;display:flex;gap:12px;overflow:auto;opacity:0;pointer-events:none;transform:translateX(calc(100% + 28px));transition:opacity .18s ease,transform .2s ease}
+.side.side-visible{opacity:1;pointer-events:auto;transform:translateX(0)}
+.side .panel{box-shadow:0 16px 45px rgba(30,40,60,.16)}
+.side .relation-panel{flex:none;width:100%}
+.side .profile-panel{flex:none;width:100%;min-height:260px;max-height:none}
+.side .profile-panel{overflow:auto}
+.side .relation-panel .panel-head{margin:-18px -18px 14px}
+.side .relation-panel{padding:18px}
+
+@media(min-width:701px){
+  .tree-viewport{height:100%}
+  .side{width:390px}
+}
+
+@media(max-width:700px){
+  .topbar{height:auto;padding:10px 12px 8px}
+  .topbar h1{font-size:18px}
+  .topbar p{font-size:10px}
+  .top-actions{margin-top:7px;gap:5px}
+  .top-actions button{padding:7px 8px;font-size:10px}
+  .layout{height:calc(100vh - 102px);padding:7px}
+  .panel-head{padding:9px 10px}
+  .panel-head span{max-width:none;font-size:9px}
+  .tree-viewport{height:100%}
+  .tool-toggle{width:34px;height:34px;font-size:16px}
+  .tree-tools{position:absolute;right:0;top:41px;z-index:7;flex-wrap:wrap;justify-content:flex-end;max-width:calc(100vw - 28px)}
+  .tree-tools button{height:34px;min-width:34px;padding:5px 7px}
+  .side{left:10px;right:10px;top:112px;bottom:10px;width:auto;transform:translateX(calc(100% + 20px));gap:8px}
+  .side .relation-panel{padding:12px}
+  .side .relation-panel .panel-head{margin:-12px -12px 9px;padding:10px 12px}
+  .side .profile-panel .panel-head{padding:10px 12px}
+  .side .profile{padding:12px}
+}
+
+/* Khi chưa chọn ai, panel bên phải hoàn toàn không chiếm chỗ và không che sơ đồ. */
+.side:not(.side-visible){visibility:hidden}
+.side.side-visible{visibility:visible}
