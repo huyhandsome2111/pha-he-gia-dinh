@@ -355,7 +355,7 @@ function isPositionMoveValid(ids,dx,dy){
 // luôn phải là một đường dọc duy nhất, đi từ trung điểm cặp cha/mẹ tới trung điểm
 // nhóm con. Connector vợ/chồng luôn là một đường ngang. Khi các khung lệch nhau,
 // hệ thống điều chỉnh vị trí các nhóm thay vì bẻ connector thành đường gấp/chéo.
-function enforcePedigreeStraight(groups, positions, nodeW, nodeH, maxPasses=80){
+function enforcePedigreeStraight(groups, positions, nodeW, nodeH, maxPasses=80, frozenIds=new Set()){
   if(!groups?.length)return;
   const centerX=id=>positions[id]?positions[id].x+nodeW/2:0;
   const groupCenterX=g=>{
@@ -369,6 +369,9 @@ function enforcePedigreeStraight(groups, positions, nodeW, nodeH, maxPasses=80){
   };
   const shiftGroup=(g,dx=0,dy=0)=>{
     if(!g)return;
+    // Khi một nhánh đã được khóa vị trí (ví dụ hai nhà Nội/Ngoại),
+    // không cho bước căn thẳng sau đó kéo cả nhánh trở lại xa nhau.
+    if(g.ids.some(id=>frozenIds.has(id)))return;
     g.ids.forEach(id=>{
       if(!positions[id])return;
       positions[id].x+=dx;
@@ -716,23 +719,10 @@ function renderTree(){
     return ids;
   }
 
-  function alignInwardBranches(){
-    if(!focusMotherId||!focusFatherId||focusMotherId===focusFatherId)return;
-    const motherPos=positions[focusMotherId],fatherPos=positions[focusFatherId];
-    if(!motherPos||!fatherPos)return;
-    const maternalIds=inwardBloodBranch(focusMotherId);
-    const paternalIds=inwardBloodBranch(focusFatherId);
-    const mCenter=motherPos.x+NODE_W/2, fCenter=fatherPos.x+NODE_W/2;
-    const currentMid=(mCenter+fCenter)/2;
-    // Ba/Mẹ sát nhau ở giữa; khoảng hở nhỏ nhưng có thêm chút đệm khi hai nhà rất đông.
-    const maternalCount=Math.max(0,maternalIds.size-1), paternalCount=Math.max(0,paternalIds.size-1);
-    const coupleGap=Math.min(70, Math.max(COUPLE_GAP, 18+Math.min(40,(maternalCount+paternalCount)*1.5)));
-    const desiredM=currentMid-(NODE_W+coupleGap)/2;
-    const desiredF=currentMid+(NODE_W+coupleGap)/2;
-    const dm=desiredM-mCenter, df=desiredF-fCenter;
-    maternalIds.forEach(id=>{if(positions[id])positions[id].x+=dm});
-    paternalIds.forEach(id=>{if(positions[id])positions[id].x+=df});
-  }
+  // Không kéo hai nhánh ở giai đoạn giữa layout nữa.
+  // Việc đưa Mẹ/Ba lại gần nhau được thực hiện sau khi toàn bộ connector
+  // đã được căn thẳng, bằng cách dịch nguyên nhánh nên không phá hình học.
+
   for(const g of roots)setGroupPositions(g,g.ownX,45+g.depth*ROW_H);
 
   const personCenter=id=>positions[id]?positions[id].x+NODE_W/2:null;
@@ -860,11 +850,94 @@ function renderTree(){
     }
   }
 
-  // Hai nhà Nội/Ngoại hướng vào nhau quanh cặp Mẹ–Ba trước khi ép connector thẳng.
-  alignInwardBranches();
-
-  // Sau khi áp dụng vị trí thủ công, vẫn phải giữ luật đường thẳng của phả hệ.
+  // Trước hết căn toàn bộ connector theo đúng luật đường thẳng.
   enforcePedigreeStraight(groups,positions,NODE_W,NODE_H,80);
+
+  /*
+   * GIAI ĐOẠN 2 — Đưa hai nhà Nội/Ngoại hướng vào nhau.
+   * Chỉ dịch nguyên nhánh theo trục X, vì vậy mọi connector bên trong
+   * nhánh vẫn giữ nguyên là đường thẳng. Mẹ là mép trong của nhà Ngoại,
+   * Ba là mép trong của nhà Nội.
+   */
+  if(focusMotherId&&focusFatherId&&positions[focusMotherId]&&positions[focusFatherId]&&focusMotherId!==focusFatherId){
+    const collectFocusBranch=(seedId,blockedId)=>{
+      const ids=new Set(inwardBloodBranch(seedId));
+      ids.add(seedId);
+      // Giữ nguyên các cặp vợ/chồng của người trong nhánh, nhưng không kéo
+      // người còn lại của cặp Mẹ–Ba sang nhánh đối diện.
+      for(const id of [...ids]){
+        const sp=get(id)?.spouse;
+        if(sp&&sp!==blockedId&&get(sp))ids.add(sp);
+      }
+      // Giữ thêm con cháu của các anh/chị/em trong chính nhánh để nếu một
+      // người có gia đình riêng thì cả cụm vẫn di chuyển đồng bộ.
+      const seed=seedId;
+      for(const id of [...ids]){
+        if(id===seed)continue;
+        for(const child of childrenOf(id)){
+          if(child.id===blockedId)continue;
+          ids.add(child.id);
+          const sp=get(child.id)?.spouse;
+          if(sp&&sp!==blockedId&&get(sp))ids.add(sp);
+        }
+      }
+      ids.delete(blockedId);
+      return ids;
+    };
+
+    const maternalBranch=collectFocusBranch(focusMotherId,focusFatherId);
+    const paternalBranch=collectFocusBranch(focusFatherId,focusMotherId);
+    const m=positions[focusMotherId], f=positions[focusFatherId];
+    const currentGap=f.x-(m.x+NODE_W);
+    const desiredGap=COUPLE_GAP;
+    const correction=(currentGap-desiredGap)/2;
+
+    maternalBranch.forEach(id=>{if(positions[id])positions[id].x+=correction});
+    paternalBranch.forEach(id=>{if(positions[id])positions[id].x-=correction});
+
+    // Nếu cây còn nhánh con của Ba+Mẹ (Tôi, anh/chị...), kéo cả cụm con
+    // về đúng trung điểm mới của Ba–Mẹ. Không dịch Ba/Mẹ nữa.
+    const focusGroup=groupByPerson.get(focusMotherId);
+    if(focusGroup&&focusGroup===groupByPerson.get(focusFatherId)&&focusGroup.children.length){
+      const childGroups=[];
+      const seenChildGroups=new Set();
+      focusGroup.children.forEach(c=>{
+        if(c.group&&!seenChildGroups.has(c.group.key)){
+          seenChildGroups.add(c.group.key);
+          childGroups.push(c.group);
+        }
+      });
+      childGroups.sort((a,b)=>(groupCenter(a)??0)-(groupCenter(b)??0));
+      if(childGroups.length){
+        const anchorValues=focusGroup.children
+          .map(c=>positions[c.childId]?positions[c.childId].x+NODE_W/2:null)
+          .filter(v=>v!=null);
+        if(anchorValues.length){
+          const clusterCenter=(Math.min(...anchorValues)+Math.max(...anchorValues))/2;
+          const parentCenter=(positions[focusMotherId].x+NODE_W/2+positions[focusFatherId].x+NODE_W/2)/2;
+          const delta=parentCenter-clusterCenter;
+          childGroups.forEach(g=>g.ids.forEach(id=>{if(positions[id])positions[id].x+=delta;}));
+        }
+      }
+    }
+
+  }
+
+  // Giai đoạn cuối chỉ căn các phần con di động dưới Ba+Mẹ; hai nhánh Nội/Ngoại
+  // đã được khóa bằng dịch nguyên khối nên không bị kéo ngược ra xa.
+  if(focusMotherId&&focusFatherId){
+    const frozen=new Set();
+    if(positions[focusMotherId]){
+      inwardBloodBranch(focusMotherId).forEach(id=>frozen.add(id));
+      frozen.add(focusMotherId);
+    }
+    if(positions[focusFatherId]){
+      inwardBloodBranch(focusFatherId).forEach(id=>frozen.add(id));
+      frozen.add(focusFatherId);
+    }
+    enforcePedigreeStraight(groups,positions,NODE_W,NODE_H,40,frozen);
+  }
+
   syncManualPositionsFromLayout(positions,manualPositions);
 
   // Dịch sơ đồ để không cắt card ở mép trái.
@@ -1015,7 +1088,21 @@ function autoFitTreeView(){
   applyTreeTransform();
 }
 
-function renderAll(autoRelation=false){renderTree();renderProfile();renderSelects(autoRelation);if(autoRelation)renderAutoRelation();else $("#relationResult").innerHTML="";}
+function syncSidePanel(){
+  const side=document.querySelector(".side");
+  if(!side)return;
+  const visible=!!selectedId&&!!get(selectedId);
+  side.classList.toggle("side-visible",visible);
+  side.setAttribute("aria-hidden",String(!visible));
+}
+
+function renderAll(autoRelation=false){
+  renderTree();
+  renderProfile();
+  renderSelects(autoRelation);
+  if(autoRelation)renderAutoRelation();else $("#relationResult").innerHTML="";
+  syncSidePanel();
+}
 
 function fillSelect(id, current){
   const el=$(id);el.innerHTML='<option value="">— Không có —</option>'+people.filter(p=>p.id!==current).map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join("");
